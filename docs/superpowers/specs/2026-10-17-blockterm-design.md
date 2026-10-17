@@ -1,7 +1,7 @@
 # blockterm — design
 
 **Date:** 2026-10-17
-**Status:** draft r2 (after review round 1)
+**Status:** draft r3 (after review round 2)
 **Repo:** https://github.com/pydevazmi/blockterm (MIT, owner `pydevazmi`)
 **npm name:** `blockterm` (checked free on npm and PyPI, 2026-10-17)
 
@@ -74,7 +74,7 @@ takes the AI agent into this ssh or vim also." "The app will be similar to Warp.
 - Our own line editor. At a shell prompt, editing is done by the user's real shell (readline,
   PSReadLine, zle), so their keybindings and completions keep working.
 - A bottom-docked agent panel. v1 docks the panel on the right, or shows it as a full-width overlay when
-  the host terminal is narrower than 100 columns.
+  docking would leave the terminal too narrow (§5.2).
 - Rebindable keys. `ctrl+k` is fixed in v1 (cost noted in §5.9).
 
 ## 4. Anti-goals (failure even if it "works")
@@ -132,14 +132,18 @@ The repo's current `.gitignore` is GitHub's Python template. Replace it with a N
   mode and mouse reporting, and draws everything itself, the way tmux does. On exit, or on a crash, it
   restores the host terminal to how it was.
 - **The mirror.** All PTY output goes into one `@xterm/headless` Terminal, the **mirror**. It's the only
-  source of truth for terminal state, and both the renderer and the agent read from it.
+  source of truth for terminal state, and both the renderer and the agent read from it. PTY output
+  passes through a streaming UTF-8 decoder (or reaches the mirror as raw bytes), because a code point
+  split across two chunks must never be corrupted. A fixture test covers chunk boundaries.
 - **Query replies.** Programs ask the terminal questions such as DA1 `ESC[c`, DSR `ESC[6n`, DECRQM and
   OSC 10/11. Whatever the mirror emits on `onData` (its replies) is written back to the PTY. Slice 1
   must check which queries the mirror already answers and add the missing ones vim, nvim, PSReadLine
   and zsh need. Each query gets a fixture test.
 - **PTY size.** The PTY's size is fixed by the layout, not by the view:
   - `cols = hostCols − 4` (outer frame 2 + block borders 2), minus the panel's width when the panel is
-    docked.
+    docked. Docked width is `clamp(floor(hostCols / 3), 36, 60)`. The panel only docks when the PTY
+    would keep at least 60 columns; otherwise it shows as a full-width overlay. The overlay never
+    resizes the PTY.
   - `rows = hostRows − 3` (header, footer, input separator).
   - The PTY is resized (debounced 50 ms) only when the host terminal is resized or the panel is
     docked or undocked. It never resizes when the view changes. The full-screen view draws the inner
@@ -156,12 +160,14 @@ There are exactly two views, chosen by one rule: **`view = mirror.buffer.active.
 'fullscreen' : 'blocks'`**.
 
 **Blocks view.** Used whenever the mirror is on the normal buffer.
-- **Finished blocks** are drawn as bordered boxes (§6). Their body is the block's cells (colours kept).
+- **Finished blocks** are drawn as bordered boxes (§6). Their body is drawn from the block's snapshot
+  (§5.4), colours kept.
   When the host has been resized since the block ran, the body is reflowed: lines joined via
   `isWrapped`, then re-wrapped by cell width, never by `String.length`.
 - **The running block.** A command that has started (OSC 133 C) and not finished (no D yet) is one
-  streaming block. Its body is the mirror's live region drawn 1:1 with the cursor, so `\r` progress
-  bars, `npm install` spinners and anything that redraws in place look right.
+  streaming block. The lines that have scrolled off come from its snapshot. The visible tail is the
+  mirror's live region drawn 1:1 with the cursor, so `\r` progress bars, `npm install` spinners and
+  anything else that redraws in place look right.
 - **No shell integration.** When there are no marks at all (ssh, a nested shell, `docker exec`, a REPL,
   or a shell with no integration), the running block just stays open. An ssh session is one running
   block headed `$ ssh prod-box` that streams the remote session. When ssh exits and marks come back, it
@@ -178,9 +184,12 @@ The agent behaves the same in both views. The view only changes how things are d
 
 **Scrolling (blocks view).** The host's own scrollback is gone, because blockterm uses the alternate
 screen. So blockterm scrolls its own list:
-- the mouse wheel (when the inner program hasn't taken the mouse),
-- `shift+PgUp`/`shift+PgDn`,
-- and selecting blocks (§5.10).
+- **The mouse wheel**, when the inner program hasn't taken the mouse.
+- **Block selection** (`ctrl+↑`/`ctrl+↓`, §5.10). This is the keyboard path that always works,
+  including on hosts with no mouse reporting (macOS Terminal.app). In selection mode,
+  `PgUp`/`PgDn`/`Home`/`End` scroll the list.
+- **`shift+PgUp`/`shift+PgDn`.** These are best-effort only, because many hosts keep them for their
+  own scrollback. Slice 1 checks which hosts deliver them: Windows Terminal, iTerm2, kitty, tmux.
 
 Finished blocks taller than 2× the viewport are capped, showing the head and tail around an
 `… N lines …` marker. Expanding the marker shows everything. Any new output snaps the view back to the
@@ -206,13 +215,28 @@ integration), and use feature detection.
   and Git Bash (the bash script, checked under MSYS). Until then they run without integration (§5.3),
   which is still fully usable, agent included.
 
+**How integration is injected:**
+- **bash:** `--rcfile` pointing at a wrapper. The wrapper sources the user's `~/.bashrc` (or, for a
+  login shell, the login profile chain), then *appends* to `PROMPT_COMMAND`.
+- **zsh:** a temporary `ZDOTDIR` whose `.zshrc` restores the user's `ZDOTDIR`, sources their real
+  files, then adds hooks with `add-zsh-hook`.
+- **pwsh:** `-NoExit -Command ". <script>"`. The script loads `$PROFILE` first, then wraps (doesn't
+  replace) the `prompt` function.
+
+Hooks are always added alongside the user's, never in place of them, so starship, oh-my-posh and p10k
+keep working. `BLOCKTERM_NO_INTEGRATION=1` turns integration off. `doctor` checks that integration
+loaded and that the prompt still renders.
+
 The mark parser is a state machine. A repeated A with no B/C/D in between is a prompt redraw (after a
 resize, or a starship/p10k re-render) and doesn't start a new block.
 
 A **Block** records:
 - id,
 - the command text (B→C),
-- the output's cell range (C→D),
+- an output **snapshot**: cells, attributes and `isWrapped` for each line, copied out of the mirror as
+  output flows (C→D). Lines that scroll off the mirror while the command runs are kept. Each block is
+  capped at 10,000 lines; beyond that it keeps the head and the tail. Blocks never point back into the
+  mirror, so evicting scrollback, clearing the screen, or swapping to the alt buffer can't break them,
 - the exit code (from D),
 - the duration (blockterm's own clock between C and D),
 - the folder (OSC 7).
@@ -248,9 +272,11 @@ This supports "edit, then approve" and "deny with a reason" without depending on
 `toolApproval` handles edited arguments, so `toolApproval` and the deprecated `needsApproval` aren't
 used.
 
-**Slice 4 starts with a short spike** using the AI SDK mock model. It checks the exact message shapes
-for pending client-side tool calls and their results on all three providers, and the plan should
-record what it finds.
+**Slice 4 starts with a short spike** using the AI SDK mock model, then one real provider and one
+openai-compatible local model. The plan should record what it finds on two points:
+- the exact message shapes for a pending client-side tool call and its appended result,
+- the multi-step setting (`stopWhen` / step count) that lets read tools run on their own up to the
+  25-call limit.
 
 **Limits.**
 - At most 25 tool calls per agent task, and at most 10 minutes per task. Hitting a limit stops the task
@@ -269,8 +295,13 @@ It must also say three things:
 
 The screen isn't sent up front; the agent calls `read_screen`.
 
-**Cancelling.** `Esc` while an agent task is running cancels it (abort signal). Any pending write card
-is dropped.
+**Cancelling.** With no approval card pending, `Esc` in the panel cancels the running agent task
+(abort signal). With a card pending, `Esc` denies that card (§5.6).
+
+**Tool support.** The agent needs a model that can call tools. `setup` and the README say so.
+`doctor`'s tiny model call includes one trivial tool call and reports whether it worked. `#` and
+Explain error use a single `generateText` call with no tools, so they still work with models that
+can't call tools.
 
 ### 5.6 Approval card
 
@@ -288,10 +319,18 @@ The user can choose:
 - `n` deny (with an optional reason),
 - `a` approve and allow writes for the rest of this task. This stays on until the task finishes or is
   cancelled, and the card is still shown, briefly, for each action.
+- `Esc` deny (empty reason). There is no "hidden card" state: a card is always waiting for one of these
+  keys.
+
+`Esc` cancels the whole agent task only when no card is pending.
 
 ### 5.7 Focus and input routing
 
-The **focus stack**, from highest priority to lowest:
+Focus is in one of two places: **the terminal** or **the panel**. `ctrl+k` toggles between them. A
+pending card only takes keys once the panel has focus.
+
+Within whatever has focus, the topmost active mode gets the key. The **focus stack**, from highest
+priority to lowest:
 1. F1 help overlay.
 2. Approval card.
 3. `#` input.
@@ -346,8 +385,8 @@ Rules:
 | `ctrl+k` | Agent panel / focus toggle |
 | `F1` | Help (both `ESC O P` and `ESC [ 11 ~` are accepted) |
 | `ctrl+l` | Clear the block history, at an idle prompt only. Otherwise it goes to the PTY. |
-| `shift+PgUp` / `shift+PgDn` | Scroll |
-| `ctrl+↑` / `ctrl+↓` | Select the previous / next block |
+| `ctrl+↑` / `ctrl+↓` | Select the previous / next block. In selection mode, `PgUp`/`PgDn`/`Home`/`End` scroll. |
+| `shift+PgUp` / `shift+PgDn` | Scroll (best-effort, depends on the host) |
 
 **Known cost:** taking over `ctrl+k` costs readline's kill-to-end-of-line and vim's `ctrl+k` digraphs.
 This is documented in the README and the help screen. Rebinding is v2.
@@ -402,7 +441,9 @@ atomic (write a temp file, then rename). Unknown keys are ignored.
   - that the PTY loads,
   - the shell that would launch,
   - whether integration loads for that shell,
-  - host terminal capabilities (alt screen, mouse, OSC 52, sync output, where these can be detected),
+  - host terminal capabilities (alt screen, mouse, OSC 52, sync output, where these can be detected).
+    It warns when the host has no mouse reporting (macOS Terminal.app) and points to the keyboard
+    equivalents,
   - the config file,
   - whether the key's variable exists.
   It then makes one tiny model call.
