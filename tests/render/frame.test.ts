@@ -24,6 +24,15 @@ function cell(f: Frame, row: number, col: number) {
   return f.cells[row * f.cols + col];
 }
 
+function rowText(f: Frame, row: number): string {
+  return f.cells
+    .slice(row * f.cols, (row + 1) * f.cols)
+    .map(c => c.ch)
+    .join('');
+}
+
+const thirtyLines = Array.from({ length: 30 }, (_, i) => `L${i}`).join('\r\n');
+
 test('mirror text lands inside the borders', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, 'hi');
   const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
@@ -96,6 +105,21 @@ test('footer sits on the last row', async () => {
     .map(c => c.ch)
     .join('');
   expect(row11).toContain(FOOTER);
+});
+
+test('shows the bottom of a scrolled buffer', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, thirtyLines);
+  const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
+  expect(rowText(f, 7).slice(2, 5)).toBe('L29');
+  expect(rowText(f, 1).slice(2, 5)).toBe('L23');
+});
+
+test('hides cursor when scrolled back', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, thirtyLines);
+  m.scrollLines(-5);
+  const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
+  expect(f.cursor.visible).toBe(false);
+  expect(rowText(f, 1).slice(2, 5)).toBe('L18');
 });
 
 test('tiny host stays rectangular', async () => {

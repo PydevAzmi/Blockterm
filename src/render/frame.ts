@@ -103,9 +103,9 @@ export function composeFrame(
     put(r, 1, side, 1, '');
     if (cols - 2 > 1) put(r, cols - 2, side, 1, '');
 
-    const mirrorRow = active.viewportY + (r - 1);
-    const line =
-      mirrorRow >= 0 && mirrorRow < layout.pty.rows ? active.getLine(mirrorRow) : undefined;
+    const i = r - 1;
+    if (i >= layout.pty.rows) continue;
+    const line = active.getLine(active.viewportY + i);
     if (!line) continue;
 
     for (let x = 0; x < layout.pty.cols; x += 1) {
