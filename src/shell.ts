@@ -8,6 +8,19 @@ export interface ShellChoice {
 
 const DEFAULT_PATHEXT = '.EXE;.CMD;.BAT';
 
+function lookupEnv(
+  env: Record<string, string | undefined>,
+  name: string,
+  platform: NodeJS.Platform,
+): string | undefined {
+  if (platform !== 'win32') return env[name];
+  const target = name.toLowerCase();
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === target) return env[key];
+  }
+  return undefined;
+}
+
 export function isOnPath(
   exe: string,
   env: Record<string, string | undefined>,
@@ -16,8 +29,8 @@ export function isOnPath(
   const win = platform === 'win32';
   const delimiter = win ? path.win32.delimiter : path.posix.delimiter;
   const join = win ? path.win32.join : path.posix.join;
-  const dirs = (env.PATH ?? '').split(delimiter);
-  const exts = (env.PATHEXT ?? DEFAULT_PATHEXT).split(delimiter);
+  const dirs = (lookupEnv(env, 'PATH', platform) ?? '').split(delimiter);
+  const exts = (lookupEnv(env, 'PATHEXT', platform) ?? DEFAULT_PATHEXT).split(delimiter);
 
   for (const dir of dirs) {
     if (dir === '') continue;
