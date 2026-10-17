@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>blockterm — a terminal built for an AI that follows you into ssh and vim</title>
-<meta name="description" content="blockterm is an open-source terminal, in early development, built so an AI agent can read and type into ssh sessions and vim after you approve each step.">
+<title>blockterm — the terminal where your AI doesn't go blind when you ssh</title>
+<meta name="description" content="Most AI terminal helpers lose sight of your screen the moment you ssh or open vim. blockterm is an open-source terminal, in early development, built so its agent keeps reading — and types only what you approve.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%231c2330%22/%3E%3Crect x=%2218%22 y=%229%22 width=%227%22 height=%2214%22 fill=%22%23e2b24a%22/%3E%3Cpath d=%22M7 10l6 6-6 6%22 stroke=%22%23d6dde8%22 stroke-width=%223%22 fill=%22none%22/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;600&family=Martian+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --steel: #dce1e7;
@@ -22,7 +23,7 @@
     --fail: #c4553e;
     --amber: #e2b24a;
     --mono: "Martian Mono", ui-monospace, Consolas, monospace;
-    --sans: "Instrument Sans", system-ui, sans-serif;
+    --sans: "Atkinson Hyperlegible Next", system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -32,14 +33,20 @@
     color: var(--ink);
     font: 400 1.0625rem/1.6 var(--sans);
   }
-  a { color: inherit; text-underline-offset: 3px; }
+  a { color: inherit; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  a:hover { text-decoration-thickness: 2px; }
+  ::selection { background: var(--amber); color: var(--slate); }
+  .term ::selection, .cmdline ::selection { background: #5a4a1c; color: #fff; }
+  html { caret-color: var(--ink); scrollbar-color: var(--slate-line) transparent; }
   :focus-visible { outline: 3px solid var(--amber); outline-offset: 3px; border-radius: 2px; }
   .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
 
   /* top line */
   .top { display: flex; justify-content: space-between; align-items: center; padding: 22px 0; }
   .wordmark { font: 700 1rem var(--mono); letter-spacing: -0.02em; text-decoration: none; }
+  .top nav { display: flex; gap: 22px; }
   .top nav a { font-weight: 500; }
+  @media (max-width: 520px) { .top nav a[href^="#"] { display: none; } }
 
   /* hero */
   .hero { padding: 48px 0 28px; }
@@ -47,8 +54,10 @@
     margin: 0;
     font: 500 clamp(1.6rem, 4.6vw, 3.4rem)/1.15 var(--mono);
     letter-spacing: -0.035em;
-    max-width: 22ch;
+    max-width: 24ch;
+    text-wrap: balance;
   }
+  .nowrap { white-space: nowrap; }
   .hero h1 .prompt { color: var(--ink-soft); }
   .hero h1 .caret {
     display: inline-block; width: 0.55em; height: 0.95em; margin-left: 0.08em;
@@ -107,7 +116,8 @@
 
   /* sections */
   section { padding: 56px 0; border-top: 1px solid var(--steel-deep); }
-  h2 { margin: 0 0 24px; font: 500 1.6rem/1.25 var(--mono); letter-spacing: -0.03em; }
+  h2 { margin: 0 0 10px; font: 600 clamp(1.5rem, 3vw, 2rem)/1.2 var(--sans); letter-spacing: -0.025em; }
+  .section-lede { margin: 0 0 28px; color: var(--ink-soft); max-width: 62ch; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 40px 56px; }
   .facts { margin: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px 40px; }
   .facts dt { font-weight: 600; margin-bottom: 6px; }
@@ -132,8 +142,20 @@
     border: 0; border-radius: 4px; padding: 5px 10px; cursor: pointer;
   }
   .cmdline button:hover { background: #fff; }
+  .cmdline button:active { transform: translateY(1px); }
+  .cmdline code::-webkit-scrollbar { height: 6px; }
+  .cmdline code::-webkit-scrollbar-thumb { background: var(--slate-line); border-radius: 3px; }
   .soon { margin-top: 10px; color: var(--ink-soft); font-size: 0.95rem; }
 
+  .transcript { margin: 10px 0 0; background: var(--slate); color: var(--screen-dim); border-radius: 6px; padding: 12px 14px; font: 0.8rem/1.6 var(--mono); }
+  .transcript > div { display: grid; grid-template-columns: 11rem 1fr; gap: 2px 12px; padding: 3px 0; }
+  .transcript dt { margin: 0; }
+  .transcript dd { margin: 0; overflow-wrap: anywhere; }
+  .transcript b { color: #fff; font-weight: 500; margin-right: 8px; }
+  .keys-inline { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
+  .keys-inline dt { margin: 0; }
+  .keys-inline dd { margin: 0; color: var(--ink-soft); }
+  kbd { font: 500 0.82em var(--mono); background: var(--slate); color: var(--screen-text); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
   ul.status { margin: 0; padding: 0; list-style: none; }
   ul.status li { display: grid; grid-template-columns: 1.6rem 1fr; padding: 6px 0; }
   ul.status .mark { font-family: var(--mono); }
@@ -154,6 +176,8 @@
     .facts, .cols { grid-template-columns: 1fr; }
   }
   @media (max-width: 520px) {
+    .transcript > div, .keys-inline { grid-template-columns: 1fr; }
+    .keys-inline dd { margin-bottom: 8px; }
     .term-bar .model { display: none; }
     .os { grid-template-columns: 1fr; }
     .os span { margin-top: 6px; }
@@ -164,13 +188,13 @@
 <div class="wrap">
   <header class="top">
     <a class="wordmark" href="/">blockterm</a>
-    <nav><a href="https://github.com/PydevAzmi/Blockterm">GitHub</a></nav>
+    <nav><a href="#install">Install</a><a href="#agent">Agent setup</a><a href="https://github.com/PydevAzmi/Blockterm">GitHub</a></nav>
   </header>
 
   <main>
     <div class="hero">
-      <h1><span class="prompt" aria-hidden="true">❯ </span># an AI that follows you into ssh and vim<span class="caret" aria-hidden="true"></span></h1>
-      <p class="lede">blockterm runs your real shell inside a terminal it controls. That is what lets it show every command as a block, and lets an AI agent <strong>read and type into whatever is on screen</strong> — a server you reached over ssh, a file open in vim — once you approve each step. It is in early development: the terminal works today, and blocks and the agent are being built.</p>
+      <h1><span class="prompt" aria-hidden="true">❯ </span># your AI goes blind the moment you type <span class="nowrap">ssh<span class="caret" aria-hidden="true"></span></span></h1>
+      <p class="lede">blockterm keeps it watching. It runs your real shell inside a terminal it controls, so its agent can <strong>read a remote shell or a vim buffer and type into it</strong> — one approved keystroke at a time. Early days: the terminal works today; blocks and the agent are being built in the open.</p>
 
       <div class="term" role="img" aria-label="blockterm with an ssh session where nginx failed to start, and the agent asking to run sudo systemctl status nginx on the remote server">
         <div class="term-bar"><span><b>blockterm</b>  ~/infra (main)</span><span class="model">claude-haiku-5-5</span></div>
@@ -258,6 +282,53 @@ npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="but
       </ol>
     </section>
 
+    <section aria-labelledby="agent">
+      <h2 id="agent">Set up the agent</h2>
+      <p class="section-lede">Coming with the agent releases. This is the planned setup, so details may still change. Today's build doesn't have these commands yet.</p>
+      <ol class="steps">
+        <li>
+          <div>
+            <p class="step-title">Pick your model</p>
+            <div class="cmdline"><code>blockterm setup</code><button type="button" aria-label="Copy the setup command">Copy</button></div>
+            <dl class="transcript" aria-label="What blockterm setup asks, with example answers">
+              <div><dt>Provider package</dt><dd><b>@ai-sdk/anthropic</b> <span>or @ai-sdk/openai, @ai-sdk/openai-compatible</span></dd></div>
+              <div><dt>Model id</dt><dd><b>claude-haiku-5-5</b> <span>any id your provider accepts</span></dd></div>
+              <div><dt>Key variable</dt><dd><b>ANTHROPIC_API_KEY</b></dd></div>
+              <div><dt>Base URL</dt><dd><span>only for openai-compatible, such as http://localhost:11434/v1 for Ollama</span></dd></div>
+            </dl>
+            <p class="soon">Your answers are saved to <code>config.json</code> in your config folder. The key itself is never written down.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <p class="step-title">Put your key in an environment variable</p>
+            <div class="os">
+              <span>Windows</span><div class="cmdline"><code>setx ANTHROPIC_API_KEY "sk-ant-…"</code><button type="button" aria-label="Copy the Windows key command">Copy</button></div>
+              <span>macOS, Linux</span><div class="cmdline"><code>echo 'export ANTHROPIC_API_KEY="sk-ant-…"' &gt;&gt; ~/.zshrc</code><button type="button" aria-label="Copy the macOS and Linux key command">Copy</button></div>
+            </div>
+            <p class="soon">Open a new terminal afterwards. Local servers like Ollama or LM Studio need no key.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <p class="step-title">Check everything works</p>
+            <div class="cmdline"><code>blockterm doctor</code><button type="button" aria-label="Copy the doctor command">Copy</button></div>
+            <p class="soon">It checks your shell, config and key, then makes one tiny call to confirm the model can use tools — the agent needs that.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <p class="step-title">Ask</p>
+            <dl class="keys-inline">
+              <dt><kbd>ctrl+k</kbd></dt><dd>Open the agent anywhere, even inside ssh or vim, and ask in plain words.</dd>
+              <dt><kbd>y</kbd> <kbd>e</kbd> <kbd>n</kbd> <kbd>a</kbd></dt><dd>Approve, edit, or deny each keystroke it wants to send, or allow the rest of this task.</dd>
+              <dt><kbd># find big files</kbd></dt><dd>At an empty prompt, get one suggested command placed in your prompt to edit.</dd>
+            </dl>
+          </div>
+        </li>
+      </ol>
+    </section>
+
     <section aria-labelledby="status">
       <h2 id="status">Status</h2>
       <div class="cols">
@@ -275,6 +346,7 @@ npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="but
             <li><span class="mark dim-ink">○</span><span>Blocks for each command</span></li>
             <li><span class="mark dim-ink">○</span><span>The agent panel, with approval for every keystroke</span></li>
             <li><span class="mark dim-ink">○</span><span><code>#</code> suggestions and Explain error</span></li>
+            <li><span class="mark dim-ink">○</span><span><code>blockterm setup</code> and <code>blockterm doctor</code></span></li>
           </ul>
         </div>
       </div>
