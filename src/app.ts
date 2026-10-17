@@ -20,6 +20,7 @@ export async function runApp(o: {
   const { shell, stdin, stdout } = o;
 
   stdin.setRawMode(true);
+  stdin.setEncoding('utf8');
   const restore = installRestore(stdin, stdout);
 
   let cleanup = (): void => {};
@@ -74,8 +75,8 @@ export async function runApp(o: {
       for (const event of tokenizer.flush()) route(event);
     };
 
-    const onData = (chunk: Buffer | string): void => {
-      for (const event of tokenizer.push(chunk.toString())) route(event);
+    const onData = (chunk: string): void => {
+      for (const event of tokenizer.push(chunk)) route(event);
       if (inputTimer !== null) clearTimeout(inputTimer);
       inputTimer = setTimeout(flushInput, 10);
     };

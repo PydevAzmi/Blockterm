@@ -1,6 +1,11 @@
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
 import { expect, test } from 'vitest';
 
-import { parseArgs } from '../src/cli.js';
+import { isMain, parseArgs } from '../src/cli.js';
 
 test('no args runs with the default shell', () =>
   expect(parseArgs([])).toEqual({ kind: 'run' }));
@@ -25,3 +30,27 @@ test('--shell without a path is an error', () =>
 
 test('unknown option is an error', () =>
   expect(parseArgs(['--nope'])).toEqual({ kind: 'error', message: 'unknown option: --nope' }));
+
+test('isMain resolves symlinks and treats a missing argv[1] as not main', ctx => {
+  const dir = mkdtempSync(join(tmpdir(), 'blockterm-cli-'));
+  try {
+    const real = join(dir, 'real.js');
+    const link = join(dir, 'link.js');
+    const other = join(dir, 'other.js');
+    writeFileSync(real, '');
+    writeFileSync(other, '');
+    try {
+      symlinkSync(real, link);
+    } catch {
+      ctx.skip();
+      return;
+    }
+
+    const url = pathToFileURL(real).href;
+    expect(isMain(link, url)).toBe(true);
+    expect(isMain(other, url)).toBe(false);
+    expect(isMain(undefined, url)).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

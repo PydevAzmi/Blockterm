@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { readFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { runApp } from './app.js';
 import { isOnPath, resolveShell } from './shell.js';
@@ -29,6 +29,17 @@ export function parseArgs(argv: string[]): Cli {
   }
 
   return shell === undefined ? { kind: 'run' } : { kind: 'run', shell };
+}
+
+export function isMain(argv1: string | undefined, metaUrl: string): boolean {
+  if (argv1 === undefined) return false;
+  try {
+    const entry = realpathSync(argv1);
+    const self = realpathSync(fileURLToPath(metaUrl));
+    return entry === self;
+  } catch {
+    return false;
+  }
 }
 
 const HELP = [
@@ -91,6 +102,6 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(process.argv[1], import.meta.url)) {
   await main();
 }
