@@ -13,6 +13,9 @@ The agent cannot drive a real interactive terminal, so the checklist was run **h
 (controller Ruling G). Items that need a real terminal, a real mouse, or hosts the harness cannot
 reach are marked **owner to verify**.
 
+**Slice-1 exit gate: OPEN** — every headless check passes; the owner items in `docs/acceptance.md`
+must be run (or failures agreed to carry into slice 2) before it closes. No failures known so far.
+
 ## 1. Does Windows raw-mode stdin deliver SGR mouse, bracketed paste and focus events?
 
 **Owner to verify.** A terminal's stdin bytes cannot be observed from inside the agent's headless
@@ -23,16 +26,24 @@ Bash, and one Unix host), then click, scroll, paste, focus the window away and b
 keys. Read the hex dumps. Click = SGR mouse `ESC[<…M`, wheel = SGR buttons 64/65, paste =
 `ESC[200~ … ESC[201~`, focus = `ESC[O` (out) / `ESC[I` (in). Ctrl+C (hex `03`) exits.
 
+The script enables `?1000h` (press/release + wheel), `?1002h` (button-drag), `?1006h` (SGR
+encoding), `?2004h` (bracketed paste) and `?1004h` (focus). Without a tracking mode (`?1000h`),
+turning on SGR alone reports no mouse, so all three are enabled.
+
 ```js
 // q1-stdin-probe.mjs — run in a real terminal:  node q1-stdin-probe.mjs
 // Then click, wheel, paste, focus away/back, press keys; Ctrl+C exits.
 process.stdin.setRawMode(true);
 process.stdin.resume();
-process.stdout.write('\x1b[?1006h\x1b[?2004h\x1b[?1004h');
+process.stdout.write('\x1b[?1006h\x1b[?1000h\x1b[?1002h\x1b[?2004h\x1b[?1004h');
 process.stdout.write('probe on: click / wheel / paste / focus / keys; Ctrl+C to stop\r\n');
 process.stdin.on('data', b => {
   process.stdout.write('HEX ' + b.toString('hex') + '\r\n');
-  if (b.includes(0x03)) { process.stdout.write('\x1b[?1004l\x1b[?2004l\x1b[?1006l'); process.exit(0); }
+  if (b.includes(0x03)) {
+    process.stdout.write('\x1b[?1004l\x1b[?2004l\x1b[?1002l\x1b[?1000l\x1b[?1006l');
+    process.stdin.setRawMode(false);
+    process.exit(0);
+  }
 });
 ```
 
@@ -67,11 +78,12 @@ clean-install job (§7) is the gate.
 ## 5. Lag or tearing vs the bare terminal?
 
 **Headless numbers pass; feel is owner to verify.** `cat` of a 10.01 MiB file (100-byte lines, so it
-scrolls constantly): blockterm finished in **~0.73 s** vs bare `node-pty` **~0.81–0.96 s** (two runs
-each), measured from command start to the shell printing a sentinel. An `echo RESP_MARK` sent 200 ms
-into the output was delivered and executed immediately after the file finished, so input stayed
-responsive and nothing was lost. Frame coalescing was not slower than the bare PTY here. Tearing,
-cursor flicker and interactive feel need a real terminal → **owner to verify**.
+scrolls constantly): blockterm finished in **~0.73 s** vs bare `node-pty` **~0.81–0.96 s** (n=2 each;
+indicative only, not a benchmark), measured from command start to the shell printing a sentinel. An
+`echo RESP_MARK` sent 200 ms into the output was delivered and executed immediately after the file
+finished, so input stayed responsive and nothing was lost. Frame coalescing was not slower than the
+bare PTY here. Tearing, cursor flicker and interactive feel need a real terminal → **owner to
+verify**.
 
 ## Windows ConPTY notes
 

@@ -8,6 +8,12 @@ Manual checks run before each release (spec §7). Every item is compared side by
 Slice-1 exit gate (spec §9 risk 1): vim, htop, less, ssh and a PSReadLine prompt feel the same as
 the bare host terminal on Windows 11 and on one Unix system.
 
+**Slice-1 exit gate: OPEN** — headless checks pass; the following owner items must be run (or
+failures agreed to carry into slice 2) before it closes: Windows Terminal + pwsh (vim/nvim, mouse in
+vim, `:q`); PowerShell 5.1 real-keyboard feel; Git Bash real-keyboard feel; one Unix host; htop/top;
+`git log` pager; ssh to a host then remote vim; `shift+PgUp` delivery; real feel (lag/tearing/cursor
+flicker). No failures known so far.
+
 ### Verified headlessly — this machine (Windows 11, 2026-10-18)
 
 Method (controller Ruling G): `node dist/cli.js` spawned inside a real `node-pty` ConPTY, its
@@ -40,8 +46,8 @@ top and pwsh are not installed on this machine.
   spike doc; verified via program output instead.)
 - [x] **`cat` of a ~10 MiB file.** 10.01 MiB, 100-byte lines. Time from command start to the shell
   printing the sentinel (prompt effectively back): blockterm **~0.73 s** vs bare node-pty
-  **~0.81–0.96 s** (two runs each). A `echo RESP_MARK` sent 200 ms into the output was delivered and
-  executed right after the file finished — input stays responsive, nothing was lost.
+  **~0.81–0.96 s** (n=2 each, indicative only). A `echo RESP_MARK` sent 200 ms into the output was
+  delivered and executed right after the file finished — input stays responsive, nothing was lost.
 - [x] **Exit code + host restore.** `exit 7` propagated (host process exit code 7), blockterm
   emitted `ESC[?1049l` and the host terminal returned to the normal buffer.
 
