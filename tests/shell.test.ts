@@ -36,6 +36,7 @@ test.skipIf(process.platform !== 'win32')('isOnPath: win32 reads Path case-insen
   const dir = tempDir();
   writeFileSync(join(dir, 'fake.EXE'), '');
   expect(isOnPath('fake', { Path: `;${dir}` }, 'win32')).toBe(true);
+  expect(isOnPath('fake.EXE', { Path: `;${dir}` }, 'win32')).toBe(true);
 });
 
 function inDir<T>(dir: string, fn: () => T): T {

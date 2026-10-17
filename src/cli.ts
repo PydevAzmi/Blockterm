@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { runApp } from './app.js';
@@ -62,6 +62,16 @@ function hasSize(stdout: NodeJS.WriteStream): boolean {
   return typeof stdout.columns === 'number' && typeof stdout.rows === 'number';
 }
 
+export function shellExists(
+  file: string,
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform,
+  exists: (p: string) => boolean = existsSync,
+): boolean {
+  if (file.includes('/') || file.includes('\\')) return exists(file);
+  return isOnPath(file, env, platform);
+}
+
 async function main(): Promise<void> {
   const cli = parseArgs(process.argv.slice(2));
 
@@ -91,6 +101,11 @@ async function main(): Promise<void> {
     override: cli.shell,
     onPath: exe => isOnPath(exe, process.env, process.platform),
   });
+
+  if (!shellExists(shell.file, process.env, process.platform)) {
+    process.stderr.write(`blockterm: cannot start shell ${shell.file}: not found\n`);
+    process.exit(1);
+  }
 
   try {
     const code = await runApp({ shell, stdin, stdout });

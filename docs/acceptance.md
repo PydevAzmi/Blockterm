@@ -40,14 +40,18 @@ top and pwsh are not installed on this machine.
   (footer row 29 → 19 → 34; right border col 99 → 69 → 119). Both in vim and at the prompt.
 - [x] **`ctrl+c` (`\x03`) during `ping -t 127.0.0.1`** (default PowerShell): ping starts, `ctrl+c`
   stops it and the prompt returns (`echo CTRLC_OK` runs).
-- [x] **Emoji and CJK render.** `cat` of a UTF-8 file containing `UNI:😀:世界:END` showed the emoji
-  and both CJK glyphs; `世` occupies a width-2 cell and the next cell is width 0 (wide-char safe).
-  (Typed emoji input is corrupted in the headless ConPTY harness even without blockterm — see the
-  spike doc; verified via program output instead.)
+- [x] **CJK width-2 render.** `cat` of a UTF-8 file containing `UNI:😀:世界:END` showed `世` on a
+  width-2 cell with the next cell width 0 (wide-char safe).
+- [ ] **Emoji width.** Owner to verify — the headless host is also xterm.js on Unicode 6 widths, so
+  the harness cannot detect width mismatches; known issue: the mirror uses Unicode 6 widths (😀
+  width 1) while shells/hosts use width 2 — fix pending the owner's decision on
+  `@xterm/addon-unicode11`. (Typed emoji input is also corrupted in the headless ConPTY harness even
+  without blockterm — see the spike doc.)
 - [x] **`cat` of a ~10 MiB file.** 10.01 MiB, 100-byte lines. Time from command start to the shell
   printing the sentinel (prompt effectively back): blockterm **~0.73 s** vs bare node-pty
   **~0.81–0.96 s** (n=2 each, indicative only). A `echo RESP_MARK` sent 200 ms into the output was
-  delivered and executed right after the file finished — input stays responsive, nothing was lost.
+  delivered and executed right after the file finished. This measures command completion, indicative
+  only — it is **not** a measure of echo latency.
 - [x] **Exit code + host restore.** `exit 7` propagated (host process exit code 7), blockterm
   emitted `ESC[?1049l` and the host terminal returned to the normal buffer.
 

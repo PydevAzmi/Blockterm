@@ -1,4 +1,5 @@
-export const ENTER_HOST = '\x1b[?1049h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[H\x1b[2J';
+export const ENTER_HOST =
+  '\x1b[?1049h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[?1007l\x1b[H\x1b[2J';
 
 export const LEAVE_HOST =
   '\x1b[?1004l\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1l\x1b>\x1b[0 q\x1b[0m\x1b[?25h\x1b[?1049l';

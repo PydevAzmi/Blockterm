@@ -58,28 +58,33 @@ test('events outside the PTY area are dropped', () => {
   expect(encodeMouse({ ...press, row: 0 }, 'vt200', true, layout)).toBeNull();
 });
 
-test('legacy press encodes with the 32 offset', () => {
-  expect(encodeMouse(press, 'vt200', false, layout)).toBe(
-    '\x1b[M' + String.fromCharCode(32, 32 + 11, 32 + 6),
+test('legacy press encodes one latin1 byte per coordinate', () => {
+  expect(encodeMouse(press, 'vt200', false, layout)).toEqual(
+    Buffer.from([0x1b, 0x5b, 0x4d, 32, 32 + 11, 32 + 6]),
   );
 });
 
 test('legacy release uses button 3', () => {
-  expect(encodeMouse({ ...press, action: 'release' }, 'vt200', false, layout)).toBe(
-    '\x1b[M' + String.fromCharCode(32 + 3, 32 + 11, 32 + 6),
+  expect(encodeMouse({ ...press, action: 'release' }, 'vt200', false, layout)).toEqual(
+    Buffer.from([0x1b, 0x5b, 0x4d, 32 + 3, 32 + 11, 32 + 6]),
   );
 });
 
-test('legacy at PTY col 223 or more is dropped', () => {
-  expect(encodeMouse({ ...press, col: 225 }, 'vt200', false, layout)).toBeNull();
+test('legacy press at PTY x=100 stays one byte per coordinate', () => {
+  expect(encodeMouse({ ...press, col: 102 }, 'vt200', false, layout)).toEqual(
+    Buffer.from([0x1b, 0x5b, 0x4d, 32 + 0, 32 + 101, 32 + 6]),
+  );
 });
 
-test('legacy drops coordinates that would overflow a byte', () => {
+test('legacy at PTY x=222 still encodes, x=223 is dropped', () => {
   const wide: Layout = {
     host: { cols: 300, rows: 40 },
     pty: { cols: 240, rows: 37 },
     origin: { row: 1, col: 2 },
   };
+  expect(encodeMouse({ ...press, col: 224 }, 'vt200', false, wide)).toEqual(
+    Buffer.from([0x1b, 0x5b, 0x4d, 32 + 0, 32 + 223, 32 + 6]),
+  );
   expect(encodeMouse({ ...press, col: 225 }, 'vt200', false, wide)).toBeNull();
 });
 

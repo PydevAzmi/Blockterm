@@ -116,3 +116,13 @@ test('exit code propagates', () => {
   pty.exit(3);
   expect(code).toBe(3);
 });
+
+test('a signal exit becomes 128 + signal', () => {
+  const { session, pty } = make();
+  let code: number | undefined;
+  session.onExit(c => {
+    code = c;
+  });
+  pty.exit(0, 15);
+  expect(code).toBe(143);
+});

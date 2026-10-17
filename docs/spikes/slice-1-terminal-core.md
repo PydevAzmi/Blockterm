@@ -81,9 +81,9 @@ clean-install job (§7) is the gate.
 scrolls constantly): blockterm finished in **~0.73 s** vs bare `node-pty` **~0.81–0.96 s** (n=2 each;
 indicative only, not a benchmark), measured from command start to the shell printing a sentinel. An
 `echo RESP_MARK` sent 200 ms into the output was delivered and executed immediately after the file
-finished, so input stayed responsive and nothing was lost. Frame coalescing was not slower than the
-bare PTY here. Tearing, cursor flicker and interactive feel need a real terminal → **owner to
-verify**.
+finished. That measures command completion, indicative only — **not** echo latency. Frame coalescing
+was not slower than the bare PTY here. Tearing, cursor flicker and interactive feel need a real
+terminal → **owner to verify**.
 
 ## Windows ConPTY notes
 
@@ -93,18 +93,29 @@ verify**.
   never delivers `'resize'` to a Node child. In this slice-1 harness the opposite was observed:
   resizing the outer `node-pty` (100×30 → 70×20 → 120×35) **did** make blockterm recompute its
   layout and reflow (footer row 29 → 19 → 34; right border col 99 → 69 → 119), reproducibly, at a
-  prompt and during vim. That is only reachable if `stdout.on('resize')` fired. Likely reason:
-  blockterm reads stdin in raw mode, which keeps libuv's Windows console-size polling active, while
-  the Task 10 fixture never read the tty. **Action:** owner to confirm in a real Windows Terminal and
-  reconcile with Task 10 (its fixture may need raw-mode stdin like blockterm). vim/less also query
-  the console size themselves.
+  prompt and during vim. That is only reachable if `stdout.on('resize')` fired. **Reason
+  unexplained:** the Task 10 fixture *did* put stdin in raw mode and read it, so the raw-mode-only
+  explanation does not hold. **Action:** owner to confirm in a real Windows Terminal and reconcile
+  with Task 10. vim/less also query the console size themselves.
 - **Typed emoji through ConPTY.** Writing `😀` (U+1F600) to a `node-pty` in this harness reaches the
   shell as U+FFFD **with or without blockterm** (bare `node-pty` reproduces it); CJK (BMP) is
   unaffected. It is a node-pty/ConPTY input-path issue, not a blockterm bug. Emoji/CJK **output**
   renders correctly (width-2 cells). Owner to check whether real Windows Terminal typing keeps
   emoji.
 
-## Bugs found
+## Bugs found (fixed in final review)
 
-None. Every headless checklist item passed. The only early anomaly (less ignoring `q`) was a bug in
-the throwaway driver's `settle()` helper, not in `src/`.
+1. **Legacy (X10) mouse reports past column ~95 were garbage.** Legacy mouse sequences were written to
+   `node-pty` as JS strings, which it encodes as UTF-8; coordinate chars ≥128 became 2 bytes each, so
+   programs reading legacy mouse (vim with `ttymouse=xterm2`) got wrong columns. Fixed by writing
+   `Buffer.from(seq, 'latin1')` for the legacy path — one byte per coordinate.
+2. **A missing shell on Unix exited 1 silently.** `node-pty` forks and the child's `exec` failure was
+   lost once the alt screen was entered. Fixed: `src/cli.ts` verifies the resolved shell exists
+   (`shellExists`) before `runApp` and prints `blockterm: cannot start shell <file>: not found` to
+   stderr, exit 1.
+3. **No IUTF8 on the Unix PTY.** `spawnSession` passed `encoding: null`, so the pty lacked `IUTF8` and
+   multibyte input could break. Fixed: `encoding: process.platform === 'win32' ? null : 'utf8'`.
+4. **No end-to-end test.** Added `tests/integration/app.test.ts`: spawns `dist/cli.js` inside
+   `node-pty` (80×24) with the host modelled by an `@xterm/headless` `Terminal`, and asserts alt
+   screen, chrome rows, command output, bracketed paste and exit code + `ESC[?1049l`. `npm test` now
+   builds first (`pretest`).

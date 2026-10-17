@@ -35,6 +35,7 @@ export function isOnPath(
   for (const dir of dirs) {
     if (dir === '') continue;
     if (win) {
+      if (existsSync(join(dir, exe))) return true;
       for (const ext of exts) {
         if (existsSync(join(dir, exe + ext))) return true;
       }

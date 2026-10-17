@@ -3,6 +3,7 @@ import type { InputEvent } from './input/tokenize.js';
 import { InputTokenizer } from './input/tokenize.js';
 import { routeToPty } from './input/route.js';
 import { computeLayout } from './layout.js';
+import type { Size } from './layout.js';
 import { renderDiff } from './render/diff.js';
 import { FOOTER, composeFrame } from './render/frame.js';
 import type { Frame } from './render/frame.js';
@@ -11,11 +12,17 @@ import type { ShellChoice } from './shell.js';
 import { hostModeDiff, hostModesFrom, trackModes } from './term/modes.js';
 import type { HostModes } from './term/modes.js';
 import { spawnSession } from './term/session.js';
+import type { TerminalSession } from './term/session.js';
 
 export async function runApp(o: {
   shell: ShellChoice;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
+  createSession?: (
+    shell: ShellChoice,
+    size: Size,
+    env: Record<string, string | undefined>,
+  ) => TerminalSession;
 }): Promise<number> {
   const { shell, stdin, stdout } = o;
 
@@ -29,8 +36,9 @@ export async function runApp(o: {
     stdout.write(ENTER_HOST);
 
     let layout = computeLayout({ cols: stdout.columns, rows: stdout.rows });
+    const startSession = o.createSession ?? spawnSession;
 
-    const session = spawnSession(shell, layout.pty, {
+    const session = startSession(shell, layout.pty, {
       ...process.env,
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
@@ -43,8 +51,10 @@ export async function runApp(o: {
     let lastHostModes: HostModes | null = null;
     let inputTimer: ReturnType<typeof setTimeout> | null = null;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let resizePending = false;
 
     const render = (): void => {
+      if (resizePending) return;
       const trackedModes = tracked.get();
       const frame = composeFrame(
         session.mirror,
@@ -82,12 +92,14 @@ export async function runApp(o: {
     };
 
     const onResize = (): void => {
+      resizePending = true;
       if (resizeTimer !== null) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         resizeTimer = null;
         layout = computeLayout({ cols: stdout.columns, rows: stdout.rows });
         session.resize(layout.pty);
         lastFrame = null;
+        resizePending = false;
         scheduler.request();
       }, 50);
     };

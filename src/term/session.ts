@@ -13,8 +13,8 @@ export type View = 'blocks' | 'fullscreen';
 
 export interface PtyLike {
   onData(cb: (d: Buffer | string) => void): IDisposable;
-  onExit(cb: (e: { exitCode: number }) => void): IDisposable;
-  write(d: string): void;
+  onExit(cb: (e: { exitCode: number; signal?: number }) => void): IDisposable;
+  write(d: string | Buffer): void;
   resize(cols: number, rows: number): void;
   kill(): void;
   readonly process: string;
@@ -56,7 +56,9 @@ export class TerminalSession {
       this.pty.onData(d => {
         this.mirror.write(d instanceof Buffer ? new Uint8Array(d) : d, () => this.parsed.fire(undefined));
       }),
-      this.pty.onExit(({ exitCode }) => this.exit.fire(exitCode)),
+      this.pty.onExit(({ exitCode, signal }) =>
+        this.exit.fire(signal == null ? exitCode : 128 + signal),
+      ),
       this.mirror.onData(d => this.pty.write(d)),
       this.mirror.buffer.onBufferChange(() => this.viewChanged.fire(this.view)),
       // ponytail: fixed colours; probe host OSC 10/11 at startup if light themes look wrong
@@ -89,7 +91,7 @@ export class TerminalSession {
     return this.exit.event(cb);
   }
 
-  write(data: string): void {
+  write(data: string | Buffer): void {
     this.pty.write(data);
   }
 
@@ -121,7 +123,7 @@ export function spawnSession(
     rows: size.rows,
     cwd: process.cwd(),
     env: cleanEnv,
-    encoding: null,
+    encoding: process.platform === 'win32' ? null : 'utf8',
   });
 
   return new TerminalSession(pty, size);

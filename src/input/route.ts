@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer';
+
 import type { IModes } from '@xterm/headless';
 
 import type { InputEvent, MouseInput } from './tokenize.js';
@@ -12,7 +14,7 @@ export function encodeMouse(
   mode: IModes['mouseTrackingMode'],
   sgr: boolean,
   layout: Layout,
-): string | null {
+): string | Buffer | null {
   const x = e.col - layout.origin.col;
   const y = e.row - layout.origin.row;
   if (x < 0 || x >= layout.pty.cols || y < 0 || y >= layout.pty.rows) return null;
@@ -39,7 +41,7 @@ export function encodeMouse(
   const cx = 32 + x + 1;
   const cy = 32 + y + 1;
   if (cx > 255 || cy > 255) return null;
-  return `\x1b[M${String.fromCharCode(32 + cb, cx, cy)}`;
+  return Buffer.from(`\x1b[M${String.fromCharCode(32 + cb, cx, cy)}`, 'latin1');
 }
 
 export function encodePaste(text: string, bracketed: boolean): string {
@@ -50,7 +52,7 @@ export function encodePaste(text: string, bracketed: boolean): string {
 export function routeToPty(
   e: InputEvent,
   ctx: { modes: IModes; tracked: TrackedModes; layout: Layout },
-): string | null {
+): string | Buffer | null {
   switch (e.type) {
     case 'bytes':
       return e.data;
