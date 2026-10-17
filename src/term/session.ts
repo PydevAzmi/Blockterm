@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { spawn } from 'node-pty';
 import xterm from '@xterm/headless';
 import type { IDisposable, Terminal as XtermTerminal } from '@xterm/headless';
@@ -51,6 +52,8 @@ export class TerminalSession {
       cols: size.cols,
       rows: size.rows,
     });
+    this.mirror.loadAddon(new Unicode11Addon());
+    this.mirror.unicode.activeVersion = '11';
 
     this.disposables.push(
       this.pty.onData(d => {

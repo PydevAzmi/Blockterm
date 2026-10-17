@@ -100,8 +100,9 @@ terminal → **owner to verify**.
 - **Typed emoji through ConPTY.** Writing `😀` (U+1F600) to a `node-pty` in this harness reaches the
   shell as U+FFFD **with or without blockterm** (bare `node-pty` reproduces it); CJK (BMP) is
   unaffected. It is a node-pty/ConPTY input-path issue, not a blockterm bug. Emoji/CJK **output**
-  renders correctly (width-2 cells). Owner to check whether real Windows Terminal typing keeps
-  emoji.
+  renders correctly: the mirror loads `@xterm/addon-unicode11` and uses Unicode 11 widths, so emoji
+  occupy width-2 cells like the host (see Bugs found). Owner to check whether real Windows Terminal
+  typing keeps emoji.
 
 ## Bugs found (fixed in final review)
 
@@ -119,3 +120,7 @@ terminal → **owner to verify**.
    `node-pty` (80×24) with the host modelled by an `@xterm/headless` `Terminal`, and asserts alt
    screen, chrome rows, command output, bracketed paste and exit code + `ESC[?1049l`. `npm test` now
    builds first (`pretest`).
+5. **Emoji widths did not match the host.** The `@xterm/headless` mirror defaults to Unicode 6
+   widths (😀 width 1) while shells/hosts use width 2, so the cursor and `renderDiff` drifted after
+   emoji. Fixed: the mirror loads `@xterm/addon-unicode11` (0.9.0) and sets
+   `unicode.activeVersion = '11'`; headless tests assert 😀 and ✅ are width 2.

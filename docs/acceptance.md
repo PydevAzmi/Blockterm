@@ -42,10 +42,9 @@ top and pwsh are not installed on this machine.
   stops it and the prompt returns (`echo CTRLC_OK` runs).
 - [x] **CJK width-2 render.** `cat` of a UTF-8 file containing `UNI:😀:世界:END` showed `世` on a
   width-2 cell with the next cell width 0 (wide-char safe).
-- [ ] **Emoji width.** Owner to verify — the headless host is also xterm.js on Unicode 6 widths, so
-  the harness cannot detect width mismatches; known issue: the mirror uses Unicode 6 widths (😀
-  width 1) while shells/hosts use width 2 — fix pending the owner's decision on
-  `@xterm/addon-unicode11`. (Typed emoji input is also corrupted in the headless ConPTY harness even
+- [ ] **Emoji width.** Known issue fixed: the mirror loads `@xterm/addon-unicode11` and uses Unicode 11
+  widths (😀 width 2), matching shells and hosts; covered by a headless test. Real-host visual check
+  stays **owner to verify**. (Typed emoji input is also corrupted in the headless ConPTY harness even
   without blockterm — see the spike doc.)
 - [x] **`cat` of a ~10 MiB file.** 10.01 MiB, 100-byte lines. Time from command start to the shell
   printing the sentinel (prompt effectively back): blockterm **~0.73 s** vs bare node-pty

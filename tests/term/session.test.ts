@@ -34,6 +34,24 @@ test('split UTF-8 code point survives', async () => {
   expect(session.mirror.buffer.active.getLine(0)!.translateToString(true)).toBe('é');
 });
 
+test('emoji is width 2', async () => {
+  const { session, pty } = make();
+  const p = parsed(session);
+  pty.emit('😀x');
+  await p;
+  const line = session.mirror.buffer.active.getLine(0)!;
+  expect(line.getCell(0)!.getWidth()).toBe(2);
+  expect(line.getCell(2)!.getChars()).toBe('x');
+});
+
+test('checkmark emoji is width 2', async () => {
+  const { session, pty } = make();
+  const p = parsed(session);
+  pty.emit('✅');
+  await p;
+  expect(session.mirror.buffer.active.getLine(0)!.getCell(0)!.getWidth()).toBe(2);
+});
+
 test('answers DSR', async () => {
   const { session, pty } = make();
   const p = parsed(session);
