@@ -1,7 +1,7 @@
 # blockterm — design
 
 **Date:** 2026-10-17
-**Status:** draft r3 (after review round 2)
+**Status:** approved (r3, 2026-10-17)
 **Repo:** https://github.com/pydevazmi/blockterm (MIT, owner `pydevazmi`)
 **npm name:** `blockterm` (checked free on npm and PyPI, 2026-10-17)
 
