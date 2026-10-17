@@ -124,3 +124,10 @@ terminal → **owner to verify**.
    widths (😀 width 1) while shells/hosts use width 2, so the cursor and `renderDiff` drifted after
    emoji. Fixed: the mirror loads `@xterm/addon-unicode11` (0.9.0) and sets
    `unicode.activeVersion = '11'`; headless tests assert 😀 and ✅ are width 2.
+
+## Follow-ups carried to later slices (from the slice-1 reviews)
+
+- Slice 2: typecheck tests (add a tests tsconfig); chrome title truncation by display width (header gains folder/branch); mouse-wheel scrolling replaces the `?1007l` stopgap; tighten diff tests (move coalescing, style reuse, trailing reset).
+- Slice 4: `TerminalSession.dispose()` doesn't kill the PTY — add `pty.kill()` on teardown/error paths (incl. exception between spawn and cleanup); cli labels every startup error "cannot start shell".
+- Slice 8: exact dependency pins; node-pty Linux has no prebuild (needs a compiler) and macOS `spawn-helper` exec bit relies on the runtime self-heal in `session.ts`; top-level node-pty import couples unit tests to the native binding.
+- Anytime, cheap: paste watchdog if a host never sends `ESC[201~`; tighten DSR assertion to `/\d+;\d+R/`; cap the resize integration test's cumulative waits; `classifyEscape` slicing is O(n²) on ESC-heavy floods; tests for multi-param DECSET, bare `CSI SP q`, held-mouse 32/33 boundary, empty/multi-entry PATH.
