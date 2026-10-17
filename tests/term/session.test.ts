@@ -1,8 +1,11 @@
 import { Buffer } from 'node:buffer';
+import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { expect, test } from 'vitest';
 
-import { TerminalSession, type View } from '../../src/term/session.js';
+import { TerminalSession, ensureExecutable, type View } from '../../src/term/session.js';
 import { FakePty } from '../helpers/fake-pty.js';
 
 function make(): { session: TerminalSession; pty: FakePty } {
@@ -143,4 +146,33 @@ test('a signal exit becomes 128 + signal', () => {
   });
   pty.exit(0, 15);
   expect(code).toBe(143);
+});
+
+test('a normal exit with signal 0 keeps the exit code', () => {
+  const { session, pty } = make();
+  let code: number | undefined;
+  session.onExit(c => {
+    code = c;
+  });
+  pty.exit(7, 0);
+  expect(code).toBe(7);
+  pty.exit(0, 0);
+  expect(code).toBe(0);
+});
+
+test.skipIf(process.platform === 'win32')('ensureExecutable adds the exec bit', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'blockterm-spawn-'));
+  try {
+    const file = join(dir, 'spawn-helper');
+    writeFileSync(file, '');
+    chmodSync(file, 0o644);
+    ensureExecutable(file);
+    expect(statSync(file).mode & 0o111).not.toBe(0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(process.platform === 'win32')('ensureExecutable ignores a missing file', () => {
+  expect(() => ensureExecutable(join(tmpdir(), 'blockterm-no-such-spawn-helper'))).not.toThrow();
 });

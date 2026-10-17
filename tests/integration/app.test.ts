@@ -63,7 +63,7 @@ test('blockterm runs a real shell end to end', async () => {
       return lines[0]!.includes('blockterm') && lines[ROWS - 1]!.includes(FOOTER);
     }, 15000);
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await waitFor(() => /[#$>]/.test(screen(host)), 10000);
     p.write(SHELL === '/bin/sh' ? 'echo SMOKE$((6*7))\r' : 'Write-Output ("SMOKE" + (6*7))\r');
     await waitFor(() => screen(host).includes('SMOKE42'), 15000);
 
@@ -80,4 +80,4 @@ test('blockterm runs a real shell end to end', async () => {
   } finally {
     if (!exited) p.kill();
   }
-}, 20000);
+}, 30000);

@@ -5,6 +5,7 @@ on: [push, pull_request]
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
@@ -15,6 +16,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: PTY prebuild diagnostics
+        if: runner.os != 'Windows'
+        run: |
+          ls -l node_modules/node-pty/prebuilds/*/ || true
+          ls -l node_modules/node-pty/build/Release/ || true
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

@@ -1,4 +1,7 @@
 import { Buffer } from 'node:buffer';
+import { chmodSync, existsSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { spawn } from 'node-pty';
@@ -60,7 +63,7 @@ export class TerminalSession {
         this.mirror.write(d instanceof Buffer ? new Uint8Array(d) : d, () => this.parsed.fire(undefined));
       }),
       this.pty.onExit(({ exitCode, signal }) =>
-        this.exit.fire(signal == null ? exitCode : 128 + signal),
+        this.exit.fire(signal ? 128 + signal : exitCode),
       ),
       this.mirror.onData(d => this.pty.write(d)),
       this.mirror.buffer.onBufferChange(() => this.viewChanged.fire(this.view)),
@@ -110,11 +113,36 @@ export class TerminalSession {
   }
 }
 
+export function ensureExecutable(file: string): void {
+  try {
+    if (existsSync(file) && (statSync(file).mode & 0o111) === 0) {
+      chmodSync(file, 0o755);
+    }
+  } catch {
+    // best effort only
+  }
+}
+
+const nodeRequire = createRequire(import.meta.url);
+
+// ponytail: self-heal for blocked install scripts; drop once packaging (slice 8) guarantees the exec bit
+function healSpawnHelper(): void {
+  try {
+    const root = dirname(nodeRequire.resolve('node-pty/package.json'));
+    ensureExecutable(join(root, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper'));
+    ensureExecutable(join(root, 'build', 'Release', 'spawn-helper'));
+  } catch {
+    // node-pty not resolvable; nothing to heal
+  }
+}
+
 export function spawnSession(
   shell: ShellChoice,
   size: Size,
   env: Record<string, string | undefined>,
 ): TerminalSession {
+  if (process.platform === 'darwin') healSpawnHelper();
+
   const cleanEnv: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (value !== undefined) cleanEnv[key] = value;
