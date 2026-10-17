@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>blockterm — an AI that follows you into ssh and vim</title>
-<meta name="description" content="blockterm is an open-source terminal that runs your real shell, shows commands as blocks, and lets an AI agent read and type into ssh sessions and vim after you approve each step.">
+<title>blockterm — a terminal built for an AI that follows you into ssh and vim</title>
+<meta name="description" content="blockterm is an open-source terminal, in early development, built so an AI agent can read and type into ssh sessions and vim after you approve each step.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -137,10 +137,12 @@
   ul.status { margin: 0; padding: 0; list-style: none; }
   ul.status li { display: grid; grid-template-columns: 1.6rem 1fr; padding: 6px 0; }
   ul.status .mark { font-family: var(--mono); }
+  ul.status .mark.ok { color: #2a6e4a; }
   .dim-ink { color: var(--ink-soft); }
 
   footer { padding: 40px 0 56px; border-top: 1px solid var(--steel-deep); color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 8px 24px; }
 
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @keyframes blink { 50% { opacity: 0; } }
   @keyframes arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) {
@@ -167,8 +169,8 @@
 
   <main>
     <div class="hero">
-      <h1><span class="prompt">❯ </span># an AI that follows you into ssh and vim<span class="caret" aria-hidden="true"></span></h1>
-      <p class="lede">blockterm runs your real shell, shows every command as a block, and lets an AI agent <strong>read and type into whatever is on screen</strong> — a server you reached over ssh, a file open in vim — once you approve each step.</p>
+      <h1><span class="prompt" aria-hidden="true">❯ </span># an AI that follows you into ssh and vim<span class="caret" aria-hidden="true"></span></h1>
+      <p class="lede">blockterm runs your real shell inside a terminal it controls. That is what lets it show every command as a block, and lets an AI agent <strong>read and type into whatever is on screen</strong> — a server you reached over ssh, a file open in vim — once you approve each step. It is in early development: the terminal works today, and blocks and the agent are being built.</p>
 
       <div class="term" role="img" aria-label="blockterm with an ssh session where nginx failed to start, and the agent asking to run sudo systemctl status nginx on the remote server">
         <div class="term-bar"><span><b>blockterm</b>  ~/infra (main)</span><span class="model">claude-haiku-5-5</span></div>
@@ -201,11 +203,11 @@ See "systemctl status nginx.service" for details.
         </div>
         <div class="term-foot">F1 help · ctrl+k agent · ctrl+l clear</div>
       </div>
-      <p class="note">This is where blockterm is heading. Today's build is the terminal core — see what works now below.</p>
+      <p class="note">A preview of the agent, which is not in the build yet. See what works today under Status.</p>
     </div>
 
     <section aria-labelledby="what">
-      <h2 id="what">What it does</h2>
+      <h2 id="what">What it is being built to do</h2>
       <dl class="facts">
         <div>
           <dt>Commands as blocks</dt>
@@ -227,12 +229,14 @@ See "systemctl status nginx.service" for details.
       <ol class="steps">
         <li>
           <div>
-            <p class="step-title">Install Node.js 24</p>
+            <p class="step-title">Install Node.js 24 or newer</p>
             <div class="os">
-              <span>Windows</span><div class="cmdline"><code>winget install OpenJS.NodeJS.LTS</code><button type="button">Copy</button></div>
-              <span>macOS</span><div class="cmdline"><code>brew install fnm &amp;&amp; fnm install 24</code><button type="button">Copy</button></div>
+              <span>Windows</span><div class="cmdline"><code>winget install OpenJS.NodeJS.LTS</code><button type="button" aria-label="Copy the Windows Node.js command">Copy</button></div>
+              <span>macOS</span><div class="cmdline"><code>brew install fnm
+eval "$(fnm env)" &amp;&amp; fnm install 24 &amp;&amp; fnm use 24</code><button type="button" aria-label="Copy the macOS Node.js commands">Copy</button></div>
               <span>Linux</span><div class="cmdline"><code>curl -fsSL https://fnm.vercel.app/install | bash
-fnm install 24</code><button type="button">Copy</button></div>
+export PATH="$HOME/.local/share/fnm:$PATH"
+eval "$(fnm env)" &amp;&amp; fnm install 24 &amp;&amp; fnm use 24</code><button type="button" aria-label="Copy the Linux Node.js commands">Copy</button></div>
             </div>
           </div>
         </li>
@@ -241,14 +245,14 @@ fnm install 24</code><button type="button">Copy</button></div>
             <p class="step-title">Build blockterm from source</p>
             <div class="cmdline"><code>git clone https://github.com/PydevAzmi/Blockterm.git
 cd Blockterm
-npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="button">Copy</button></div>
+npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="button" aria-label="Copy the build commands">Copy</button></div>
             <p class="soon">On Linux, building needs <code>python3</code>, <code>make</code> and <code>g++</code>. <code>npm i -g blockterm</code> arrives with the first release.</p>
           </div>
         </li>
         <li>
           <div>
             <p class="step-title">Run it</p>
-            <div class="cmdline"><code>blockterm</code><button type="button">Copy</button></div>
+            <div class="cmdline"><code>blockterm</code><button type="button" aria-label="Copy the run command">Copy</button></div>
           </div>
         </li>
       </ol>
@@ -282,12 +286,15 @@ npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="but
     <span>MIT licensed</span>
   </footer>
 </div>
+<p class="sr" id="copy-status" aria-live="polite"></p>
 <script>
   document.querySelectorAll('.cmdline button').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var text = btn.previousElementSibling.textContent;
+      if (!navigator.clipboard) { btn.textContent = 'Select and copy'; return; }
       navigator.clipboard.writeText(text).then(function () {
         btn.textContent = 'Copied';
+        document.getElementById('copy-status').textContent = 'Copied to clipboard';
         setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
       }, function () {
         btn.textContent = 'Select and copy';

@@ -30,6 +30,11 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: staging
+    permissions:
+      contents: read
+    concurrency:
+      group: deploy-landing
+      cancel-in-progress: false
     steps:
       - name: Deploy landing page over SSH
         env:
@@ -40,6 +45,7 @@ jobs:
           DIR: ${{ secrets.DEPLOY_PATH }}
         run: |
           set -eu
+          : "${DIR:?DEPLOY_PATH secret is empty}"
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy

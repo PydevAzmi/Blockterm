@@ -1,7 +1,7 @@
 name: blockterm
 
 services:
-  site:
+  blockterm-site:
     build:
       context: ..
       dockerfile: deploy/site.Dockerfile
