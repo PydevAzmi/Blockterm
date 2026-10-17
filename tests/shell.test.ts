@@ -32,7 +32,7 @@ afterEach(() => {
   dirs.length = 0;
 });
 
-test('isOnPath: win32 reads Path case-insensitively, skips empty segments, applies default PATHEXT', () => {
+test.skipIf(process.platform !== 'win32')('isOnPath: win32 reads Path case-insensitively, skips empty segments, applies default PATHEXT', () => {
   const dir = tempDir();
   writeFileSync(join(dir, 'fake.EXE'), '');
   expect(isOnPath('fake', { Path: `;${dir}` }, 'win32')).toBe(true);
