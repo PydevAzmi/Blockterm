@@ -24,3 +24,43 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  deploy:
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Deploy landing page over SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          DIR: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -eu
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Host key pinned from a secret, never ssh-keyscan (which trusts whatever answers).
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          if ! ssh-keygen -F "$HOST" -f ~/.ssh/known_hosts > /dev/null; then
+            echo "No known_hosts entry matches DEPLOY_HOST."
+            # Shapes only: the secrets are masked in the log.
+            echo "DEPLOY_HOST: ${#HOST} chars"
+            awk '{ printf "known_hosts line %d: %d fields, field1=%d chars, field2=%s\n", \
+                   NR, NF, length($1), (length($2) < 20 ? $2 : length($2) " chars") }' ~/.ssh/known_hosts
+            echo "Want: 3 fields, field1 == DEPLOY_HOST, field2 == a key type such as ssh-ed25519."
+            exit 1
+          fi
+          ssh -i ~/.ssh/id_deploy "$USER@$HOST" "DIR=$DIR bash -s" <<'REMOTE'
+          set -eu
+          cd "$DIR"
+          git fetch --prune origin
+          # --ff-only: a dirty or diverged clone on the VPS fails the deploy instead of being merged over.
+          git merge --ff-only origin/main
+          # --wait fails the job if the container never reports healthy.
+          docker compose -f deploy/docker-compose.prod.yml up -d --build --wait
+          docker image prune -f
+          REMOTE

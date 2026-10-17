@@ -1,0 +1,23 @@
+name: blockterm
+
+services:
+  site:
+    build:
+      context: ..
+      dockerfile: deploy/site.Dockerfile
+    container_name: blockterm-site
+    restart: unless-stopped
+    networks:
+      - default
+      - edge
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+networks:
+  default: {}
+  edge:
+    external: true
