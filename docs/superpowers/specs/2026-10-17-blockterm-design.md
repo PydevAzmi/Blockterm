@@ -541,6 +541,31 @@ installs the packed tarball (`npm pack`) on clean runners to prove no compiler i
 - **Landing page.** One static HTML file in `site/`, covering what blockterm is, a screenshot (an
   asciinema demo is recorded during slice 5 acceptance), and install commands with copy buttons. It's
   served from the user's VPS at `blockterm.mohamedazmi.dev`.
+- **Landing page deploy (decided 2026-10-18; same pattern as the owner's
+  `PydevAzmi/carrier-operations-platform`).**
+  - **Edge proxy:** the VPS runs a shared edge Caddy (`~/edge`, container `caddy`) that owns ports
+    80/443 and terminates TLS. It reaches each project's container by name over the external
+    Docker network `edge`.
+  - **Container:** `deploy/site.Dockerfile` is `caddy:2-alpine` with a tiny `deploy/Caddyfile`
+    (`:80 { encode zstd gzip; root * /srv/site; file_server }`) and `COPY site/ /srv/site`.
+  - **Compose:** `deploy/docker-compose.prod.yml` (project name `blockterm`) runs one service with
+    container name `blockterm-site`, on networks `default` and external `edge`. It publishes no host
+    ports, has `restart: unless-stopped`, and a `wget` healthcheck on `http://127.0.0.1:80/`.
+  - **Edge config (one-time, the owner's step on the VPS):** add a block to the edge Caddyfile in
+    `~/edge`: `blockterm.mohamedazmi.dev { reverse_proxy blockterm-site:80 }`. Point DNS at the VPS.
+  - **CI:** a `deploy` job in `.github/workflows/ci.yml` runs after the test matrix, only on pushes
+    to `main`, in GitHub environment `staging`.
+    - It connects over raw SSH, with the key from secret `DEPLOY_SSH_KEY` and the host key pinned
+      from secret `DEPLOY_KNOWN_HOSTS`, never `ssh-keyscan`. It checks the `known_hosts` lookup
+      first and prints a shapes-only hint on a mismatch.
+    - On the VPS it runs `cd $DEPLOY_PATH && git fetch --prune origin && git merge --ff-only
+      origin/main`, then `docker compose -f deploy/docker-compose.prod.yml build`, then `docker
+      compose -f deploy/docker-compose.prod.yml up -d --wait`, then `docker image prune -f`.
+    - The rest of the secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH` (for example
+      `/home/ubuntu/apps/blockterm`, a git clone of this repo). The owner creates all the secrets
+      and the clone.
+    - Tag pushes (`v*`) run CI only. npm publishing is a separate, manual release step
+      (`docs/release.md`).
 
 ## 9. Risks (spike these first)
 

@@ -1,0 +1,133 @@
+# Spike: slice 1 terminal core
+
+Date: 2026-10-18 · Windows 11 · Node 24.19.0 · `node-pty` 1.1.0 · `@xterm/headless` 6.0.0
+
+Slice-1 spike for spec §9 risks **1** (renderer quality and speed) and **4** (Windows ConPTY
+quirks). Findings below; the runnable checks are in `docs/acceptance.md`.
+
+## How this was run
+
+The agent cannot drive a real interactive terminal, so the checklist was run **headlessly**:
+`node dist/cli.js` spawned inside a real `node-pty` ConPTY, its output fed into an
+`@xterm/headless` `Terminal` acting as the host, then the host screen read back after each step
+(controller Ruling G). Items that need a real terminal, a real mouse, or hosts the harness cannot
+reach are marked **owner to verify**.
+
+**Slice-1 exit gate: OPEN** — every headless check passes; the owner items in `docs/acceptance.md`
+must be run (or failures agreed to carry into slice 2) before it closes. No failures known so far.
+
+## 1. Does Windows raw-mode stdin deliver SGR mouse, bracketed paste and focus events?
+
+**Owner to verify.** A terminal's stdin bytes cannot be observed from inside the agent's headless
+harness.
+
+How: run the script below in a real terminal (Windows Terminal with pwsh / PowerShell 5.1 / Git
+Bash, and one Unix host), then click, scroll, paste, focus the window away and back, and press
+keys. Read the hex dumps. Click = SGR mouse `ESC[<…M`, wheel = SGR buttons 64/65, paste =
+`ESC[200~ … ESC[201~`, focus = `ESC[O` (out) / `ESC[I` (in). Ctrl+C (hex `03`) exits.
+
+The script enables `?1000h` (press/release + wheel), `?1002h` (button-drag), `?1006h` (SGR
+encoding), `?2004h` (bracketed paste) and `?1004h` (focus). Without a tracking mode (`?1000h`),
+turning on SGR alone reports no mouse, so all three are enabled.
+
+```js
+// q1-stdin-probe.mjs — run in a real terminal:  node q1-stdin-probe.mjs
+// Then click, wheel, paste, focus away/back, press keys; Ctrl+C exits.
+process.stdin.setRawMode(true);
+process.stdin.resume();
+process.stdout.write('\x1b[?1006h\x1b[?1000h\x1b[?1002h\x1b[?2004h\x1b[?1004h');
+process.stdout.write('probe on: click / wheel / paste / focus / keys; Ctrl+C to stop\r\n');
+process.stdin.on('data', b => {
+  process.stdout.write('HEX ' + b.toString('hex') + '\r\n');
+  if (b.includes(0x03)) {
+    process.stdout.write('\x1b[?1004l\x1b[?2004l\x1b[?1002l\x1b[?1000l\x1b[?1006l');
+    process.stdin.setRawMode(false);
+    process.exit(0);
+  }
+});
+```
+
+If a host does not deliver one of these, record which and what arrives instead; blockterm degrades
+per spec §5.7 (raw text when not bracketed, no mouse forwarding when the inner program has not asked
+for it, focus forwarded only under mode 1004).
+
+## 2. Which queries needed custom replies?
+
+**Pass.** Only **OSC 10** (foreground) and **OSC 11** (background) need a custom reply (Task 3).
+The mirror answers DSR (`ESC[6n`), DA1 (`ESC[c`) and DECRQM (`ESC[?2004$p`) natively.
+`src/term/session.ts` registers OSC 10/11 handlers that reply **only** to the query form
+(`OSC 1x;?`), never to a colour set. Both are covered by tests (query replies for OSC 10 and OSC 11,
+plus a colour-set-is-not-answered case).
+
+## 3. Which hosts deliver `shift+PgUp` (spec §5.3)?
+
+**Owner to verify.** Spec §5.3 names Windows Terminal, iTerm2, kitty and tmux as the hosts to check.
+Many keep `shift+PgUp` for their own scrollback. Slice 1 has no host-scroll feature, so this is
+data-gathering for slice 2. Not observable headlessly.
+
+## 4. node-pty 1.1.0 prebuilds (slice 8 / risk 2)
+
+**Pass, with a known gap.** Verified from the installed package: `node_modules/node-pty/prebuilds`
+holds exactly `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`. There is **no linux
+prebuild**; `scripts/prebuild.js` exits 1 for an unknown platform, after which the `install` script
+runs `node-gyp rebuild`, which needs `python3`, `make` and a C++ compiler. Fine for CI (the Linux
+runner compiles) but it conflicts with goal G8 ("no compiler") for Linux end users. Slice 8 must
+choose: per-platform `optionalDependencies` (the esbuild pattern) or a pinned prebuilt fork. The CI
+clean-install job (§7) is the gate.
+
+## 5. Lag or tearing vs the bare terminal?
+
+**Headless numbers pass; feel is owner to verify.** `cat` of a 10.01 MiB file (100-byte lines, so it
+scrolls constantly): blockterm finished in **~0.73 s** vs bare `node-pty` **~0.81–0.96 s** (n=2 each;
+indicative only, not a benchmark), measured from command start to the shell printing a sentinel. An
+`echo RESP_MARK` sent 200 ms into the output was delivered and executed immediately after the file
+finished. That measures command completion, indicative only — **not** echo latency. Frame coalescing
+was not slower than the bare PTY here. Tearing, cursor flicker and interactive feel need a real
+terminal → **owner to verify**.
+
+## Windows ConPTY notes
+
+- **Default shell** on this machine resolved to `powershell.exe` **5.1** (`5.1.26100`), because
+  `pwsh` is not on PATH. Matches the global constraint (`pwsh` if present, else `powershell.exe`).
+- **Resize — contradicts the Task 10 finding.** Task 10's fixture reported that Windows ConPTY
+  never delivers `'resize'` to a Node child. In this slice-1 harness the opposite was observed:
+  resizing the outer `node-pty` (100×30 → 70×20 → 120×35) **did** make blockterm recompute its
+  layout and reflow (footer row 29 → 19 → 34; right border col 99 → 69 → 119), reproducibly, at a
+  prompt and during vim. That is only reachable if `stdout.on('resize')` fired. **Reason
+  unexplained:** the Task 10 fixture *did* put stdin in raw mode and read it, so the raw-mode-only
+  explanation does not hold. **Action:** owner to confirm in a real Windows Terminal and reconcile
+  with Task 10. vim/less also query the console size themselves.
+- **Typed emoji through ConPTY.** Writing `😀` (U+1F600) to a `node-pty` in this harness reaches the
+  shell as U+FFFD **with or without blockterm** (bare `node-pty` reproduces it); CJK (BMP) is
+  unaffected. It is a node-pty/ConPTY input-path issue, not a blockterm bug. Emoji/CJK **output**
+  renders correctly: the mirror loads `@xterm/addon-unicode11` and uses Unicode 11 widths, so emoji
+  occupy width-2 cells like the host (see Bugs found). Owner to check whether real Windows Terminal
+  typing keeps emoji.
+
+## Bugs found (fixed in final review)
+
+1. **Legacy (X10) mouse reports past column ~95 were garbage.** Legacy mouse sequences were written to
+   `node-pty` as JS strings, which it encodes as UTF-8; coordinate chars ≥128 became 2 bytes each, so
+   programs reading legacy mouse (vim with `ttymouse=xterm2`) got wrong columns. Fixed by writing
+   `Buffer.from(seq, 'latin1')` for the legacy path — one byte per coordinate.
+2. **A missing shell on Unix exited 1 silently.** `node-pty` forks and the child's `exec` failure was
+   lost once the alt screen was entered. Fixed: `src/cli.ts` verifies the resolved shell exists
+   (`shellExists`) before `runApp` and prints `blockterm: cannot start shell <file>: not found` to
+   stderr, exit 1.
+3. **No IUTF8 on the Unix PTY.** `spawnSession` passed `encoding: null`, so the pty lacked `IUTF8` and
+   multibyte input could break. Fixed: `encoding: process.platform === 'win32' ? null : 'utf8'`.
+4. **No end-to-end test.** Added `tests/integration/app.test.ts`: spawns `dist/cli.js` inside
+   `node-pty` (80×24) with the host modelled by an `@xterm/headless` `Terminal`, and asserts alt
+   screen, chrome rows, command output, bracketed paste and exit code + `ESC[?1049l`. `npm test` now
+   builds first (`pretest`).
+5. **Emoji widths did not match the host.** The `@xterm/headless` mirror defaults to Unicode 6
+   widths (😀 width 1) while shells/hosts use width 2, so the cursor and `renderDiff` drifted after
+   emoji. Fixed: the mirror loads `@xterm/addon-unicode11` (0.9.0) and sets
+   `unicode.activeVersion = '11'`; headless tests assert 😀 and ✅ are width 2.
+
+## Follow-ups carried to later slices (from the slice-1 reviews)
+
+- Slice 2: typecheck tests (add a tests tsconfig); chrome title truncation by display width (header gains folder/branch); mouse-wheel scrolling replaces the `?1007l` stopgap; tighten diff tests (move coalescing, style reuse, trailing reset).
+- Slice 4: `TerminalSession.dispose()` doesn't kill the PTY — add `pty.kill()` on teardown/error paths (incl. exception between spawn and cleanup); cli labels every startup error "cannot start shell".
+- Slice 8: exact dependency pins; node-pty Linux has no prebuild (needs a compiler) and macOS `spawn-helper` exec bit relies on the runtime self-heal in `session.ts`; top-level node-pty import couples unit tests to the native binding.
+- Anytime, cheap: paste watchdog if a host never sends `ESC[201~`; tighten DSR assertion to `/\d+;\d+R/`; cap the resize integration test's cumulative waits; `classifyEscape` slicing is O(n²) on ESC-heavy floods; tests for multi-param DECSET, bare `CSI SP q`, held-mouse 32/33 boundary, empty/multi-entry PATH.
