@@ -60,11 +60,13 @@ export class TerminalSession {
       this.mirror.onData(d => this.pty.write(d)),
       this.mirror.buffer.onBufferChange(() => this.viewChanged.fire(this.view)),
       // ponytail: fixed colours; probe host OSC 10/11 at startup if light themes look wrong
-      this.mirror.parser.registerOscHandler(10, () => {
+      this.mirror.parser.registerOscHandler(10, data => {
+        if (data !== '?') return false;
         this.pty.write('\x1b]10;rgb:ffff/ffff/ffff\x07');
         return true;
       }),
-      this.mirror.parser.registerOscHandler(11, () => {
+      this.mirror.parser.registerOscHandler(11, data => {
+        if (data !== '?') return false;
         this.pty.write('\x1b]11;rgb:0000/0000/0000\x07');
         return true;
       }),

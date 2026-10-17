@@ -66,6 +66,22 @@ test('answers OSC 11 background query', async () => {
   expect(pty.written.join('')).toMatch(/\x1b\]11;rgb:/);
 });
 
+test('answers OSC 10 foreground query', async () => {
+  const { session, pty } = make();
+  const p = parsed(session);
+  pty.emit('\x1b]10;?\x07');
+  await p;
+  expect(pty.written.join('')).toMatch(/\x1b\]10;rgb:/);
+});
+
+test('OSC 11 colour set is not answered', async () => {
+  const { session, pty } = make();
+  const p = parsed(session);
+  pty.emit('\x1b]11;#112233\x07');
+  await p;
+  expect(pty.written.join('')).not.toContain(']11;');
+});
+
 test('alt screen flips view', async () => {
   const { session, pty } = make();
   const views: View[] = [];
@@ -81,6 +97,7 @@ test('alt screen flips view', async () => {
   pty.emit('\x1b[?1049l');
   await leave;
   expect(session.view).toBe('blocks');
+  expect(views).toEqual(['fullscreen', 'blocks']);
 });
 
 test('resize hits pty and mirror', () => {
