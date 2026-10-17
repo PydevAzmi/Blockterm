@@ -90,3 +90,43 @@ test('trailing prefix of our forms is held', () => {
     expect(t.flush()).toEqual([{ type: 'bytes', data: prefix }]);
   }
 });
+
+test('flush is a no-op during an unfinished paste', () => {
+  const t = new InputTokenizer();
+  expect(t.push('\x1b[200~ab\x1b[20')).toEqual([]);
+  expect(t.flush()).toEqual([]);
+  expect(t.push('1~')).toEqual([{ type: 'paste', text: 'ab' }]);
+  expect(t.push('x')).toEqual([{ type: 'bytes', data: 'x' }]);
+});
+
+test('paste end marker split across pushes', () => {
+  const t = new InputTokenizer();
+  expect(t.push('\x1b[200~hi\x1b[20')).toEqual([]);
+  expect(t.push('1~')).toEqual([{ type: 'paste', text: 'hi' }]);
+});
+
+test('SGR mouse with empty or non-numeric fields is bytes', () => {
+  expect(new InputTokenizer().push('\x1b[<;;M')).toEqual([{ type: 'bytes', data: '\x1b[<;;M' }]);
+  expect(new InputTokenizer().push('\x1b[<0;5M')).toEqual([{ type: 'bytes', data: '\x1b[<0;5M' }]);
+  expect(new InputTokenizer().push('\x1b[<abcM')).toEqual([{ type: 'bytes', data: '\x1b[<abcM' }]);
+});
+
+test('over-long held mouse prefix is emitted as bytes', () => {
+  const long = '\x1b[<' + '1'.repeat(40);
+  expect(new InputTokenizer().push(long)).toEqual([{ type: 'bytes', data: long }]);
+});
+
+test('held escape prefixes resolve with the next push', () => {
+  const bracket = new InputTokenizer();
+  expect(bracket.push('\x1b[')).toEqual([]);
+  expect(bracket.push('A')).toEqual([{ type: 'bytes', data: '\x1b[A' }]);
+
+  const esc = new InputTokenizer();
+  expect(esc.push('\x1b')).toEqual([]);
+  expect(esc.push('x')).toEqual([{ type: 'bytes', data: '\x1bx' }]);
+});
+
+test('non-ours escapes are not delayed', () => {
+  expect(new InputTokenizer().push('\x1bjk')).toEqual([{ type: 'bytes', data: '\x1bjk' }]);
+  expect(new InputTokenizer().push('\x1b[15~')).toEqual([{ type: 'bytes', data: '\x1b[15~' }]);
+});

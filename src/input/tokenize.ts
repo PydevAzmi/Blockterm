@@ -61,14 +61,13 @@ function classifyEscape(s: string, i: number): Parsed {
     while (k < rest.length) {
       const ch = rest[k];
       if (ch === 'M' || ch === 'm') {
-        const parts = rest.slice(3, k).split(';');
-        if (parts.length !== 3) return { kind: 'none' };
-        const button = Number(parts[0]);
-        const col = Number(parts[1]);
-        const row = Number(parts[2]);
-        if (!Number.isFinite(button) || !Number.isFinite(col) || !Number.isFinite(row)) {
+        const fields = rest.slice(3, k).split(';');
+        if (fields.length !== 3 || !fields.every(f => /^[0-9]+$/.test(f))) {
           return { kind: 'none' };
         }
+        const button = Number(fields[0]);
+        const col = Number(fields[1]);
+        const row = Number(fields[2]);
         return {
           kind: 'event',
           length: k + 1,
@@ -81,6 +80,7 @@ function classifyEscape(s: string, i: number): Parsed {
       }
       return { kind: 'none' };
     }
+    if (rest.length - 3 > 32) return { kind: 'none' };
     return { kind: 'hold' };
   }
 
@@ -198,6 +198,7 @@ export class InputTokenizer {
   }
 
   flush(): InputEvent[] {
+    if (this.pasteMode) return [];
     const events: InputEvent[] = [];
     if (this.pending !== '') {
       events.push({ type: 'bytes', data: this.pending });
