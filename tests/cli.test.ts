@@ -40,6 +40,9 @@ test('setup is a subcommand', () =>
 test('doctor is a subcommand', () =>
   expect(parseArgs(['doctor'])).toEqual({ kind: 'doctor' }));
 
+test('update is a subcommand', () =>
+  expect(parseArgs(['update'])).toEqual({ kind: 'update' }));
+
 test('setup with an extra argument is an error', () =>
   expect(parseArgs(['setup', 'x'])).toEqual({ kind: 'error', message: 'unexpected argument: x' }));
 

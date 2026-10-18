@@ -1,5 +1,5 @@
 # Blockterm
-an open-source terminal named Blockterm. It runs commands in your real shell and shows each command with its output as a block. Typing # plain English asks the AI for a command, which you can edit before it runs.
+an open-source terminal named Blockterm. It wraps your real shell — ssh, vim, anything — and keeps it exactly as it is. Press `ctrl+k` to open an agent panel, describe what you want in plain words, and it types into your shell one approved keystroke at a time. Command blocks and `#` plain-English suggestions are coming.
 
 Website: https://blockterm.mohamedazmi.dev
 
@@ -12,6 +12,16 @@ npm install && npm run build && npm link
 ```
 
 On Linux, building needs `python3`, `make` and `g++`.
+
+## Updating
+
+Update the clone and rebuild with one command:
+
+```sh
+blockterm update
+```
+
+It runs `git pull --ff-only`, then `npm install` and `npm run build`. An install from `npm i -g blockterm` updates the global package instead. Restart any open blockterm windows afterwards.
 
 ## Set up the agent
 

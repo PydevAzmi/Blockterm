@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import { configPath, loadConfig } from './config.js';
 import { runDoctor } from './doctor.js';
 import { type Io, runSetup } from './setup.js';
 import { isOnPath, resolveShell, shellExists } from './shell.js';
+import { detectInstall, runUpdate, spawnStep } from './update.js';
 
 export { shellExists };
 
@@ -18,12 +19,14 @@ export type Cli =
   | { kind: 'run'; shell?: string }
   | { kind: 'setup' }
   | { kind: 'doctor' }
+  | { kind: 'update' }
   | { kind: 'error'; message: string };
 
 export function parseArgs(argv: string[]): Cli {
-  if (argv[0] === 'setup' || argv[0] === 'doctor') {
+  const sub = argv[0];
+  if (sub === 'setup' || sub === 'doctor' || sub === 'update') {
     if (argv.length > 1) return { kind: 'error', message: `unexpected argument: ${argv[1]}` };
-    return argv[0] === 'setup' ? { kind: 'setup' } : { kind: 'doctor' };
+    return { kind: sub };
   }
 
   let shell: string | undefined;
@@ -57,11 +60,12 @@ export function isMain(argv1: string | undefined, metaUrl: string): boolean {
 }
 
 const HELP = [
-  'usage: blockterm [setup | doctor] [--shell <path>] [--version] [--help]',
+  'usage: blockterm [setup | doctor | update] [--shell <path>] [--version] [--help]',
   '',
   'commands:',
   '  setup           choose the model and save the config',
   '  doctor          check node, pty, shell, config, key and model',
+  '  update          update blockterm itself (git pull or npm), then rebuild',
   '',
   'options:',
   '  --shell <path>  run the given shell instead of the default',
@@ -172,6 +176,16 @@ async function runDoctorCommand(): Promise<number> {
   return failed ? 1 : 0;
 }
 
+async function runUpdateCommand(): Promise<number> {
+  const cliFile = fileURLToPath(import.meta.url);
+  const install = detectInstall(cliFile, existsSync);
+  return runUpdate({
+    install,
+    run: spawnStep,
+    print: line => process.stdout.write(`${line}\n`),
+  });
+}
+
 async function main(): Promise<void> {
   const cli = parseArgs(process.argv.slice(2));
 
@@ -194,6 +208,9 @@ async function main(): Promise<void> {
   }
   if (cli.kind === 'doctor') {
     process.exit(await runDoctorCommand());
+  }
+  if (cli.kind === 'update') {
+    process.exit(await runUpdateCommand());
   }
 
   const { stdin, stdout } = process;

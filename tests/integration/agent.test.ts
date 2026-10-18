@@ -101,7 +101,10 @@ test('the agent runs a write end to end through openai-compatible', async () => 
     await waitFor(() => screen(host).includes('Type into'), 30000);
     p.write('y');
 
-    await waitFor(() => screen(host).includes('AGENT_OK'), 30000);
+    // The composed frame begins every row with two chrome cells, so the PTY text
+    // starts at column 2. A row whose PTY content is exactly AGENT_OK proves the
+    // shell ran `echo AGENT_OK`, rather than the panel merely echoing the command.
+    await waitFor(() => /^.{2}AGENT_OK\s/m.test(screen(host)), 30000);
     await waitFor(() => screen(host).includes('Done.'), 30000);
 
     const lines = readFileSync(recordFile, 'utf8').trim().split('\n');
