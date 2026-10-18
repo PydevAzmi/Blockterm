@@ -128,6 +128,17 @@ test('resize hits pty and mirror', () => {
   expect(session.mirror.cols).toBe(50);
 });
 
+test('program reports the pty process name', () => {
+  const { session } = make();
+  expect(session.program).toBe('fake-shell');
+});
+
+test('kill kills the pty', () => {
+  const { session, pty } = make();
+  session.kill();
+  expect(pty.killed).toBe(true);
+});
+
 test('exit code propagates', () => {
   const { session, pty } = make();
   let code: number | undefined;

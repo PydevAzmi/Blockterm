@@ -85,6 +85,10 @@ export class TerminalSession {
     return this.mirror.buffer.active.type === 'alternate' ? 'fullscreen' : 'blocks';
   }
 
+  get program(): string {
+    return this.pty.process;
+  }
+
   onParsed(cb: () => void): IDisposable {
     return this.parsed.event(() => cb());
   }
@@ -104,6 +108,10 @@ export class TerminalSession {
   resize(size: Size): void {
     this.pty.resize(size.cols, size.rows);
     this.mirror.resize(size.cols, size.rows);
+  }
+
+  kill(): void {
+    this.pty.kill();
   }
 
   dispose(): void {

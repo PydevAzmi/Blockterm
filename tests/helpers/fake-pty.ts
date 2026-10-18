@@ -3,9 +3,10 @@ import type { IDisposable } from '@xterm/headless';
 import type { PtyLike } from '../../src/term/session.js';
 
 export class FakePty implements PtyLike {
-  readonly process = 'fake-pty';
+  readonly process = 'fake-shell';
   readonly written: (string | Buffer)[] = [];
   readonly resizes: [number, number][] = [];
+  killed = false;
 
   private readonly dataListeners = new Set<(d: Buffer | string) => void>();
   private readonly exitListeners = new Set<(e: { exitCode: number; signal?: number }) => void>();
@@ -28,7 +29,9 @@ export class FakePty implements PtyLike {
     this.resizes.push([cols, rows]);
   }
 
-  kill(): void {}
+  kill(): void {
+    this.killed = true;
+  }
 
   emit(d: Buffer | string): void {
     for (const cb of [...this.dataListeners]) cb(d);
