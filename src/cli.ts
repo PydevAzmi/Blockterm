@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 import { runApp } from './app.js';
@@ -79,25 +80,70 @@ function hasSize(stdout: NodeJS.WriteStream): boolean {
   return typeof stdout.columns === 'number' && typeof stdout.rows === 'number';
 }
 
-async function runSetupCommand(): Promise<void> {
-  const { createInterface } = await import('node:readline/promises');
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const io: Io = {
-    ask: async (question, def) => {
-      const label = def === undefined ? `${question}: ` : `${question} [${def}]: `;
-      const answer = (await rl.question(label)).trim();
-      return answer === '' && def !== undefined ? def : answer;
+export interface ReadlineIo extends Io {
+  close(): void;
+}
+
+export function createIo(
+  input: NodeJS.ReadableStream,
+  output: NodeJS.WritableStream,
+): ReadlineIo {
+  const rl = createInterface({ input, output });
+  const buffered: string[] = [];
+  let pending: ((line: string) => void) | null = null;
+  let closed = false;
+
+  rl.on('line', line => {
+    if (pending !== null) {
+      const resolve = pending;
+      pending = null;
+      resolve(line);
+    } else {
+      buffered.push(line);
+    }
+  });
+
+  rl.on('close', () => {
+    closed = true;
+    if (pending !== null) {
+      const resolve = pending;
+      pending = null;
+      resolve('');
+    }
+  });
+
+  return {
+    ask: (question, def) => {
+      rl.setPrompt(def === undefined ? `${question}: ` : `${question} [${def}]: `);
+      rl.prompt();
+      return new Promise<string>(resolve => {
+        const finish = (line: string): void => {
+          const answer = line.trim();
+          resolve(answer === '' && def !== undefined ? def : answer);
+        };
+        const next = buffered.shift();
+        if (next !== undefined) finish(next);
+        else if (closed) finish('');
+        else pending = finish;
+      });
     },
     print: line => {
-      process.stdout.write(`${line}\n`);
+      output.write(`${line}\n`);
+    },
+    close: () => {
+      rl.close();
     },
   };
+}
+
+async function runSetupCommand(): Promise<void> {
+  const io = createIo(process.stdin, process.stdout);
   try {
     const path = configPath(process.platform, process.env, homedir());
     const loaded = loadConfig(path);
     await runSetup(io, path, loaded.ok ? loaded.config : null);
   } finally {
-    rl.close();
+    io.close();
   }
 }
 

@@ -54,3 +54,13 @@ export function keyHint(platform: NodeJS.Platform, varName: string): string[] {
     'add it to ~/.bashrc or ~/.zshrc to keep it',
   ];
 }
+
+const SK_TOKEN = /sk-[A-Za-z0-9_-]{8,}/g;
+
+export function redact(text: string, secrets: string[]): string {
+  let out = text;
+  for (const secret of secrets) {
+    if (secret !== '') out = out.split(secret).join('***');
+  }
+  return out.replace(SK_TOKEN, '***');
+}

@@ -31,8 +31,7 @@ const anthropic: Config = {
   shell: null,
 };
 
-function mockModel(callTool: boolean): LanguageModel {
-  let step = 0;
+function mockModel(callTool: boolean): LanguageModel {  let step = 0;
   const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
   return {
     specificationVersion: 'v2',
@@ -58,6 +57,21 @@ function mockModel(callTool: boolean): LanguageModel {
     },
     doStream: async () => {
       throw new Error('doStream is not used');
+    },
+  } as unknown as LanguageModel;
+}
+
+function throwingModel(message: string): LanguageModel {
+  return {
+    specificationVersion: 'v2',
+    provider: 'mock',
+    modelId: 'mock-model',
+    supportedUrls: {},
+    doGenerate: async () => {
+      throw new Error(message);
+    },
+    doStream: async () => {
+      throw new Error(message);
     },
   } as unknown as LanguageModel;
 }
@@ -141,4 +155,21 @@ test('runDoctor: a model that never calls the tool fails the model check', async
     ok: false,
     detail: 'model answered but did not call the tool — the agent needs a tool-capable model',
   });
+});
+
+test('runDoctor: redacts the key value out of a provider error message', async () => {
+  const configPath = join(tempDir(), 'config.json');
+  saveConfig(configPath, anthropic);
+
+  const checks = await runDoctor({
+    ...base,
+    configPath,
+    env: { ANTHROPIC_API_KEY: 'sk-secret-123' },
+    modelOverride: throwingModel('401 invalid x-api-key sk-secret-123'),
+  });
+
+  const model = checkNamed(checks, 'model');
+  expect(model.ok).toBe(false);
+  expect(model.detail).toContain('401');
+  expect(model.detail).not.toContain('sk-secret-123');
 });

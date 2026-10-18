@@ -3,7 +3,7 @@ import type { LanguageModel } from 'ai';
 import { expect, test } from 'vitest';
 
 import type { Config } from '../../src/config.js';
-import { createModel, keyHint } from '../../src/agent/model.js';
+import { createModel, keyHint, redact } from '../../src/agent/model.js';
 
 function meta(model: LanguageModel): { modelId?: string; provider?: string } {
   return model as { modelId?: string; provider?: string };
@@ -69,6 +69,18 @@ test('keyHint: linux uses export', () =>
     'export X="<your key>"',
     'add it to ~/.bashrc or ~/.zshrc to keep it',
   ]));
+
+test('redact: replaces a known secret with ***', () =>
+  expect(redact('bad key sk-secret-123 here', ['sk-secret-123'])).toBe('bad key *** here'));
+
+test('redact: scrubs sk- tokens even without a known secret', () => {
+  const out = redact('Incorrect API key provided: sk-proj-abcdEFGH1234', []);
+  expect(out).not.toContain('abcdEFGH1234');
+  expect(out).toContain('***');
+});
+
+test('redact: ignores an empty secret', () =>
+  expect(redact('nothing to hide', [''])).toBe('nothing to hide'));
 
 test('ModelResult never leaks the key', () => {
   const env = { ANTHROPIC_API_KEY: 'sk-secret-123' };

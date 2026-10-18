@@ -1,7 +1,7 @@
 import { generateText, isStepCount, jsonSchema } from 'ai';
 import type { LanguageModel } from 'ai';
 
-import { createModel } from './agent/model.js';
+import { createModel, redact } from './agent/model.js';
 import type { Config } from './config.js';
 import { loadConfig } from './config.js';
 import { shellExists } from './shell.js';
@@ -121,11 +121,9 @@ export async function runDoctor(o: {
           },
     );
   } catch (err) {
-    checks.push({
-      name: 'model',
-      ok: false,
-      detail: err instanceof Error ? err.message : String(err),
-    });
+    const secrets = config.apiKeyEnv !== '' ? [o.env[config.apiKeyEnv] ?? ''] : [];
+    const message = err instanceof Error ? err.message : String(err);
+    checks.push({ name: 'model', ok: false, detail: redact(message, secrets) });
   }
 
   return checks;
