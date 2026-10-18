@@ -155,7 +155,7 @@ test('a truncated card still edits with e', () => {
 test('n starts a denial reason and enter denies with it', () => {
   const started = reduce(withCard(), bytes('n')).ui;
   expect(started.card?.denying).toBe(true);
-  const r = reduce(started, bytes('no\r'));
+  const r = reduce({ ...started, inputTruncated: false }, bytes('no\r'));
   expect(r.actions).toEqual([{ type: 'decide', decision: { kind: 'deny', reason: 'no' } }]);
   expect(r.ui.card).toBeNull();
 });
@@ -170,23 +170,58 @@ test('e prefills the input for editing and enter approves the edit', () => {
   const editing = reduce(withCard(), bytes('e')).ui;
   expect(editing.card?.editing).toBe(true);
   expect(editing.input).toBe('rm -rf\r');
-  const r = reduce({ ...editing, input: 'rm -rf /' }, bytes('\r'));
+  const r = reduce({ ...editing, input: 'rm -rf /', inputTruncated: false, inputShown: true }, bytes('\r'));
   expect(r.actions).toEqual([
     { type: 'decide', decision: { kind: 'approve', keys: 'rm -rf /', allowRest: false } },
   ]);
   expect(r.ui.card).toBeNull();
 });
 
-test('enter in the edit field does nothing while the input is truncated', () => {
+test('entering edit mode marks the field truncated and not yet shown', () => {
   const editing = reduce(withCard(), bytes('e')).ui;
-  const r = reduce({ ...editing, input: 'x'.repeat(200), inputTruncated: true }, bytes('\r'));
+  expect(editing.inputTruncated).toBe(true);
+  expect(editing.inputShown).toBe(false);
+});
+
+test('entering deny mode marks the field truncated and not yet shown', () => {
+  const denying = reduce(withCard(), bytes('n')).ui;
+  expect(denying.inputTruncated).toBe(true);
+  expect(denying.inputShown).toBe(false);
+});
+
+test('e and enter in one chunk do not approve an unseen edit', () => {
+  const r = reduce(withCard(), bytes('e\r'));
+  expect(r.actions).toEqual([]);
+  expect(r.ui.card?.editing).toBe(true);
+  expect(r.ui.input).toBe('rm -rf\r');
+});
+
+test('enter does not approve an edit before the field is first drawn', () => {
+  const editing = reduce(withCard(), bytes('e')).ui;
+  const r = reduce(editing, bytes('\r'));
   expect(r.actions).toEqual([]);
   expect(r.ui.card?.editing).toBe(true);
 });
 
-test('enter approves an edit once the input fits', () => {
+test('typing in the edit field clears the shown marker until the next draw', () => {
+  const editing = { ...reduce(withCard(), bytes('e')).ui, inputTruncated: false, inputShown: true };
+  const typed = reduce(editing, bytes('x')).ui;
+  expect(typed.inputShown).toBe(false);
+  const r = reduce(typed, bytes('\r'));
+  expect(r.actions).toEqual([]);
+  expect(r.ui.card?.editing).toBe(true);
+});
+
+test('enter in the edit field does nothing while the input is truncated', () => {
   const editing = reduce(withCard(), bytes('e')).ui;
-  const r = reduce({ ...editing, input: 'rm -rf /', inputTruncated: false }, bytes('\r'));
+  const r = reduce({ ...editing, input: 'x'.repeat(200), inputTruncated: true, inputShown: true }, bytes('\r'));
+  expect(r.actions).toEqual([]);
+  expect(r.ui.card?.editing).toBe(true);
+});
+
+test('enter approves an edit once the field is drawn and fits', () => {
+  const editing = reduce(withCard(), bytes('e')).ui;
+  const r = reduce({ ...editing, input: 'rm -rf /', inputTruncated: false, inputShown: true }, bytes('\r'));
   expect(r.actions).toEqual([
     { type: 'decide', decision: { kind: 'approve', keys: 'rm -rf /', allowRest: false } },
   ]);

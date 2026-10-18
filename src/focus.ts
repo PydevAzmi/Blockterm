@@ -6,6 +6,7 @@ export interface PanelUi {
   focus: 'terminal' | 'panel';
   input: string;
   inputTruncated?: boolean;
+  inputShown?: boolean;
   mode: 'idle' | 'busy';
   card: null | {
     keys: string;
@@ -93,24 +94,37 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
 
     if (card.editing || card.denying) {
       if (ch === DEL || ch === BS) {
-        next = { ...next, input: deleteLast(next.input) };
+        next = { ...next, input: deleteLast(next.input), inputShown: false };
       } else if (ch === '\r') {
-        if (next.inputTruncated === true) continue;
+        if (next.inputTruncated !== false) continue;
+        if (card.editing && next.inputShown !== true) continue;
         const decision: Decision = card.editing
           ? { kind: 'approve', keys: next.input, allowRest: false }
           : { kind: 'deny', reason: next.input };
         return decide(next, decision);
       } else if (isPrintable(ch)) {
-        next = { ...next, input: next.input + ch };
+        next = { ...next, input: next.input + ch, inputShown: false };
       }
     } else if (ch === 'y' && card.truncated !== true) {
       return decide(next, { kind: 'approve', keys: card.keys, allowRest: false });
     } else if (ch === 'a' && card.truncated !== true) {
       return decide(next, { kind: 'approve', keys: card.keys, allowRest: true });
     } else if (ch === 'n') {
-      next = { ...next, input: '', card: { ...card, denying: true } };
+      next = {
+        ...next,
+        input: '',
+        inputTruncated: true,
+        inputShown: false,
+        card: { ...card, denying: true },
+      };
     } else if (ch === 'e') {
-      next = { ...next, input: card.keys, card: { ...card, editing: true } };
+      next = {
+        ...next,
+        input: card.keys,
+        inputTruncated: true,
+        inputShown: false,
+        card: { ...card, editing: true },
+      };
     }
   }
   return { ui: next, actions: [] };
@@ -118,7 +132,10 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
 
 function panelPaste(ui: PanelUi, text: string): { ui: PanelUi; actions: Action[] } {
   if (ui.card !== null && (ui.card.editing || ui.card.denying)) {
-    return { ui: { ...ui, input: ui.input + text.replace(/[\r\n]/g, '') }, actions: [] };
+    return {
+      ui: { ...ui, input: ui.input + text.replace(/[\r\n]/g, ''), inputShown: false },
+      actions: [],
+    };
   }
   if (ui.card === null) {
     return { ui: { ...ui, input: ui.input + text }, actions: [] };

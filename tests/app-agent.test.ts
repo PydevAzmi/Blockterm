@@ -259,6 +259,84 @@ test('an approval waits for a quiet pause after the card is shown', async () => 
   }
 });
 
+test('an edit-and-enter sent right after the card is ignored', async () => {
+  vi.useFakeTimers();
+  try {
+    const model = sendKeysThenDone();
+    const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+    stdin.emit('data', '\x0b');
+    await vi.advanceTimersByTimeAsync(0);
+    stdin.emit('data', 'hello\r');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(output(stdout)).toContain('Type into');
+
+    stdin.emit('data', 'e\r');
+    await vi.advanceTimersByTimeAsync(20);
+    expect(pty.written).toHaveLength(0);
+
+    pty.exit(0);
+    await expect(run).resolves.toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('type-ahead right after a card does not approve unseen keys', async () => {
+  vi.useFakeTimers();
+  try {
+    const model = sendKeysThenDone();
+    const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+    stdin.emit('data', '\x0b');
+    await vi.advanceTimersByTimeAsync(0);
+    stdin.emit('data', 'hello\r');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(output(stdout)).toContain('Type into');
+
+    for (const ch of ['m', 'a', 'k', 'e', '\r']) {
+      stdin.emit('data', ch);
+      await vi.advanceTimersByTimeAsync(11);
+      expect(pty.written).toHaveLength(0);
+    }
+
+    pty.exit(0);
+    await expect(run).resolves.toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('an edited card is approved once the field is drawn and quiet', async () => {
+  vi.useFakeTimers();
+  try {
+    const model = sendKeysThenDone();
+    const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+    stdin.emit('data', '\x0b');
+    await vi.advanceTimersByTimeAsync(0);
+    stdin.emit('data', 'hello\r');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(output(stdout)).toContain('Type into');
+
+    await vi.advanceTimersByTimeAsync(450);
+    stdin.emit('data', 'e');
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(450);
+    stdin.emit('data', '\r');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(pty.written.map(String).join('')).toContain('echo hi\r');
+
+    pty.exit(0);
+    await expect(run).resolves.toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test('a provider error adds a note pointing at blockterm doctor', async () => {
   const model = new MockLanguageModelV4({
     doStream: async () => {
@@ -442,8 +520,9 @@ test('a card too long to show rejects y but approves an edit with enter', async 
   await wait(20);
   expect(pty.written).toHaveLength(0);
 
+  await wait(450);
   stdin.emit('data', 'e');
-  await wait(5);
+  await wait(450);
   stdin.emit('data', '\r');
   await until(() => pty.written.length > 0);
   expect(pty.written.map(String).join('')).toContain('echo xxxx');
@@ -465,8 +544,9 @@ test('an edit whose keys do not all fit is not approved by enter', async () => {
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
   await until(() => output(stdout).includes('Type into'));
+  await wait(450);
   stdin.emit('data', 'e');
-  await wait(50);
+  await wait(450);
   stdin.emit('data', '\r');
   await wait(50);
   expect(pty.written).toHaveLength(0);
@@ -488,8 +568,9 @@ test('the same edit fits and is approved in a wider panel', async () => {
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
   await until(() => output(stdout).includes('Type into'));
+  await wait(450);
   stdin.emit('data', 'e');
-  await wait(50);
+  await wait(450);
   stdin.emit('data', '\r');
   await until(() => pty.written.length > 0);
   expect(pty.written.map(String).join('')).toContain('echo xxxx');

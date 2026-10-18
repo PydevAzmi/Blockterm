@@ -33,7 +33,7 @@ import type { TerminalSession } from './term/session.js';
 
 const CONFIG_HINT = 'Run `blockterm setup` to choose a model';
 const APPROVAL_QUIET_MS = 400;
-const APPROVE_KEYS = new Set(['y', 'a']);
+const APPROVE_KEYS = new Set(['y', 'a', 'e']);
 
 export function cardTokens(keys: string): { kind: 'text' | 'key'; label: string }[] {
   const parsed = parseKeys(keys);
@@ -143,11 +143,13 @@ export async function runApp(o: {
         if ((ui.inputTruncated ?? false) !== panel.inputTruncated) {
           ui = { ...ui, inputTruncated: panel.inputTruncated };
         }
+        if (ui.inputShown !== true) ui = { ...ui, inputShown: true };
       } else if (card !== null) {
         cardShownAt = null;
         if (ui.card !== null && ui.card.truncated !== true) {
           ui = { ...ui, card: { ...ui.card, truncated: true } };
         }
+        if (ui.inputShown !== false) ui = { ...ui, inputShown: false };
       }
       const hostModes = hostModesFrom(session.mirror, trackedModes);
       const out = hostModeDiff(lastHostModes, hostModes) + renderDiff(lastFrame, frame);
@@ -300,6 +302,7 @@ export async function runApp(o: {
               ui = {
                 ...ui,
                 input: '',
+                inputShown: false,
                 card: {
                   keys,
                   target: session.program,
@@ -364,7 +367,15 @@ export async function runApp(o: {
       if (event.type !== 'bytes') return false;
       if (ui.focus !== 'panel') return false;
       const c = ui.card;
-      if (c === null || c.editing || c.denying || c.truncated === true) return false;
+      if (c === null) return false;
+
+      if (c.editing) {
+        if (!event.data.includes('\r')) return false;
+        if (ui.inputShown !== true) return true;
+        return quiet < APPROVAL_QUIET_MS;
+      }
+      if (c.denying) return false;
+
       if (![...event.data].some(ch => APPROVE_KEYS.has(ch))) return false;
       if (cardShownAt === null) return true;
       return now - cardShownAt < APPROVAL_QUIET_MS || quiet < APPROVAL_QUIET_MS;
