@@ -22,14 +22,6 @@ export interface Block {
 const MAX_LINES = 10000;
 const HALF = MAX_LINES / 2;
 
-function cap(lines: SnapLine[]): { kept: SnapLine[]; omitted: number } {
-  if (lines.length <= MAX_LINES) return { kept: lines, omitted: 0 };
-  return {
-    kept: [...lines.slice(0, HALF), ...lines.slice(lines.length - HALF)],
-    omitted: lines.length - MAX_LINES,
-  };
-}
-
 function isBlank(cell: Cell): boolean {
   return cell.ch === '' || cell.ch === ' ';
 }
@@ -49,8 +41,10 @@ export class BlockStore {
   private commandMarker: IMarker | null = null;
   private commandCol = 0;
   private outputMarker: IMarker | null = null;
-  private outputStartRow = 0;
   private commandPending = false;
+
+  private feedWatch: IDisposable | null = null;
+  private feeds = 0;
 
   private live: { command: string; startedAt: number } | null = null;
 
@@ -112,8 +106,6 @@ export class BlockStore {
 
   clear(): void {
     this.finished = [];
-    this.commandPending = false;
-    this.releaseMarkers();
     this.emitChange();
   }
 
@@ -124,6 +116,8 @@ export class BlockStore {
 
   dispose(): void {
     this.watcher.dispose();
+    this.feedWatch?.dispose();
+    this.feedWatch = null;
     this.releaseMarkers();
     this.listeners.clear();
   }
@@ -132,6 +126,7 @@ export class BlockStore {
     this.seen = true;
     switch (mark.kind) {
       case 'prompt':
+        if (this.live) this.finish(mark.row, null);
         this.commandPending = false;
         this.promptMarker?.dispose();
         this.promptMarker = this.mark(mark.row);
@@ -146,8 +141,12 @@ export class BlockStore {
         this.commandPending = false;
         this.outputMarker?.dispose();
         this.outputMarker = this.mark(mark.row);
-        this.outputStartRow = mark.row;
         this.live = { command: mark.commandText, startedAt: this.now() };
+        this.feeds = 0;
+        this.feedWatch?.dispose();
+        this.feedWatch = this.mirror.onLineFeed(() => {
+          this.feeds += 1;
+        });
         break;
       case 'done':
         this.finish(mark.row, mark.exitCode);
@@ -159,48 +158,83 @@ export class BlockStore {
     this.emitChange();
   }
 
-  private finish(dRow: number, exitCode: number): void {
-    if (!this.live) {
+  private finish(dRow: number, exitCode: number | null): void {
+    const produced = this.feeds;
+    this.feedWatch?.dispose();
+    this.feedWatch = null;
+    this.feeds = 0;
+
+    const live = this.live;
+    if (!live) {
       this.releaseMarkers();
       return;
     }
-    const start = this.outputMarker && this.outputMarker.line >= 0 ? this.outputMarker.line : 0;
-    const evicted = !this.outputMarker || this.outputMarker.line < 0;
-    const { kept, omitted } = cap(this.capture(start, dRow));
+
+    const marker = this.outputMarker;
+    const evicted = !marker || marker.line < 0;
+    const start = evicted ? 0 : marker!.line;
+    const end = this.endRow(dRow);
+    const { lines, captured } = this.capture(start, end);
+    const capped = captured > MAX_LINES ? captured - MAX_LINES : 0;
+    const lost = evicted ? Math.max(0, produced - captured) : 0;
+
     this.finished.push({
       id: this.nextId++,
-      command: this.live.command,
+      command: live.command,
       cwd: this.currentCwd,
       exitCode,
-      startedAt: this.live.startedAt,
+      startedAt: live.startedAt,
       endedAt: this.now(),
-      lines: kept,
-      omitted: omitted + (evicted ? this.outputStartRow + 1 : 0),
+      lines,
+      omitted: lost + capped,
     });
     this.live = null;
     this.releaseMarkers();
   }
 
-  private capture(start: number, dRow: number): SnapLine[] {
+  private endRow(dRow: number): number {
     const buffer = this.mirror.buffer.active;
-    const end = dRow - 1;
-    if (end < start) return [];
+    if (buffer.cursorX > 0) {
+      const line = buffer.getLine(dRow);
+      if (line) {
+        for (let col = 0; col < buffer.cursorX; col++) {
+          const cell = line.getCell(col);
+          if (cell && cell.getCode() !== 0 && cell.getCode() !== 32) return dRow;
+        }
+      }
+    }
+    return dRow - 1;
+  }
+
+  private capture(start: number, end: number): { lines: SnapLine[]; captured: number } {
+    if (end < start) return { lines: [], captured: 0 };
+    const total = end - start + 1;
     const lines: SnapLine[] = [];
-    const reCell = buffer.getNullCell();
-    const cols = this.mirror.cols;
-    for (let row = start; row <= end; row++) {
-      const line = buffer.getLine(row);
-      if (!line) continue;
-      const cells: Cell[] = [];
-      for (let col = 0; col < cols; col++) {
+    if (total <= MAX_LINES) {
+      for (let row = start; row <= end; row++) lines.push(this.snapLine(row));
+    } else {
+      const headEnd = start + HALF - 1;
+      const tailStart = end - HALF + 1;
+      for (let row = start; row <= headEnd; row++) lines.push(this.snapLine(row));
+      for (let row = tailStart; row <= end; row++) lines.push(this.snapLine(row));
+    }
+    return { lines, captured: total };
+  }
+
+  private snapLine(row: number): SnapLine {
+    const buffer = this.mirror.buffer.active;
+    const line = buffer.getLine(row);
+    const cells: Cell[] = [];
+    if (line) {
+      const reCell = buffer.getNullCell();
+      for (let col = 0; col < this.mirror.cols; col++) {
         const cell = line.getCell(col, reCell);
         cells.push(cell ? cellFrom(cell) : { ch: ' ', width: 1, sgr: '' });
       }
       while (cells.length > 0 && isBlank(cells[cells.length - 1]!)) cells.pop();
-      const next = buffer.getLine(row + 1);
-      lines.push({ cells, wrapped: next ? next.isWrapped : false });
     }
-    return lines;
+    const next = buffer.getLine(row + 1);
+    return { cells, wrapped: next ? next.isWrapped : false };
   }
 
   private mark(row: number): IMarker | null {

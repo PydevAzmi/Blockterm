@@ -141,3 +141,64 @@ test('running, promptRow, cwd and integrated track live state', async () => {
   expect(store.running).toBeNull();
   expect(store.blocks[0]!.cwd).toBe('/home/u');
 });
+
+test('clear keeps the live prompt and idle state (Ruling AE)', async () => {
+  const mirror = makeMirror();
+  const store = new BlockStore(mirror);
+  await write(mirror, '\x1b]133;A\x07$ \x1b]133;B\x07');
+  const row = store.promptRow;
+  expect(store.isIdlePrompt()).toBe(true);
+
+  store.clear();
+  expect(store.promptRow).toBe(row);
+  expect(store.isIdlePrompt()).toBe(true);
+});
+
+test('clear mid-run keeps the running block and captures only its output', async () => {
+  const mirror = makeMirror();
+  const store = new BlockStore(mirror);
+  await write(mirror, '\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n\x1b]133;C\x07');
+  store.clear();
+  expect(store.running).not.toBeNull();
+
+  await write(mirror, 'out\r\n\x1b]133;D;0\x07');
+  const block = store.blocks[0]!;
+  expect(block.lines.map(text)).toEqual(['out']);
+  expect(block.omitted).toBe(0);
+});
+
+test('a prompt while running ends the block with a null exit code', async () => {
+  const mirror = makeMirror();
+  const store = new BlockStore(mirror);
+  await write(mirror, '\x1b]133;B\x07sleep\r\n\x1b]133;C\x07partial\r\n');
+  expect(store.running).not.toBeNull();
+
+  await write(mirror, '\x1b]133;A\x07$ ');
+  expect(store.running).toBeNull();
+  const block = store.blocks[0]!;
+  expect(block.command).toBe('sleep');
+  expect(block.exitCode).toBeNull();
+  expect(block.lines.map(text)).toEqual(['partial']);
+});
+
+test('output on the D row is captured as the last line', async () => {
+  const mirror = makeMirror();
+  const store = new BlockStore(mirror);
+  await write(mirror, '\x1b]133;B\x07printf x\r\n\x1b]133;C\x07x\x1b]133;D;0\x07');
+  expect(store.blocks[0]!.lines.map(text)).toEqual(['x']);
+});
+
+test('scrollback eviction: omitted counts the lost lines', async () => {
+  const mirror = makeMirror(20, 24, 1000);
+  const store = new BlockStore(mirror);
+  const body = Array.from({ length: 3000 }, (_, i) => `${i + 1}`).join('\r\n');
+
+  await write(
+    mirror,
+    `\x1b]133;B\x07seq\r\n\x1b]133;C\x07${body}\r\n\x1b]133;D;0\x07`,
+  );
+
+  const block = store.blocks[0]!;
+  expect(text(block.lines[block.lines.length - 1]!)).toBe('3000');
+  expect(Math.abs(block.lines.length + block.omitted - 3000)).toBeLessThanOrEqual(1);
+});
