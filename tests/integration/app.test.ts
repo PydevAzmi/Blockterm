@@ -3,7 +3,13 @@ import { fileURLToPath } from 'node:url';
 import type { Terminal as XtermTerminal } from '@xterm/headless';
 import xterm from '@xterm/headless';
 import { spawn } from 'node-pty';
-import { expect, test } from 'vitest';
+import { beforeAll, expect, test } from 'vitest';
+
+import { healSpawnHelper } from '../../src/term/session.js';
+
+beforeAll(() => {
+  healSpawnHelper();
+});
 
 const { Terminal } = xterm;
 

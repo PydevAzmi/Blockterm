@@ -134,7 +134,7 @@ export function ensureExecutable(file: string): void {
 const nodeRequire = createRequire(import.meta.url);
 
 // ponytail: self-heal for blocked install scripts; drop once packaging (slice 8) guarantees the exec bit
-function healSpawnHelper(): void {
+export function healSpawnHelper(): void {
   try {
     const root = dirname(nodeRequire.resolve('node-pty/package.json'));
     ensureExecutable(join(root, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper'));
