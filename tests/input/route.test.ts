@@ -11,6 +11,7 @@ const layout: Layout = {
   host: { cols: 120, rows: 40 },
   pty: { cols: 116, rows: 37 },
   origin: { row: 1, col: 2 },
+  panel: { mode: 'hidden', rect: null },
 };
 
 const m = (o: Partial<IModes>): IModes => o as IModes;
@@ -81,6 +82,7 @@ test('legacy at PTY x=222 still encodes, x=223 is dropped', () => {
     host: { cols: 300, rows: 40 },
     pty: { cols: 240, rows: 37 },
     origin: { row: 1, col: 2 },
+    panel: { mode: 'hidden', rect: null },
   };
   expect(encodeMouse({ ...press, col: 224 }, 'vt200', false, wide)).toEqual(
     Buffer.from([0x1b, 0x5b, 0x4d, 32 + 0, 32 + 223, 32 + 6]),

@@ -194,7 +194,7 @@
   <main>
     <div class="hero">
       <h1><span class="prompt" aria-hidden="true">❯ </span># your AI goes blind the moment you type <span class="nowrap">ssh<span class="caret" aria-hidden="true"></span></span></h1>
-      <p class="lede">blockterm keeps it watching. It runs your real shell inside a terminal it controls, so its agent can <strong>read a remote shell or a vim buffer and type into it</strong> — one approved keystroke at a time. Early days: the terminal works today; blocks and the agent are being built in the open.</p>
+      <p class="lede">blockterm keeps it watching. It runs your real shell inside a terminal it controls, so its agent can <strong>read a remote shell or a vim buffer and type into it</strong> — one approved keystroke at a time. Early days: the terminal, the agent panel and its approval card work today; blocks are still being built in the open.</p>
 
       <div class="term" role="img" aria-label="blockterm with an ssh session where nginx failed to start, and the agent asking to run sudo systemctl status nginx on the remote server">
         <div class="term-bar"><span><b>blockterm</b>  ~/infra (main)</span><span class="model">claude-haiku-5-5</span></div>
@@ -227,7 +227,7 @@ See "systemctl status nginx.service" for details.
         </div>
         <div class="term-foot">F1 help · ctrl+k agent · ctrl+l clear</div>
       </div>
-      <p class="note">A preview of the agent, which is not in the build yet. See what works today under Status.</p>
+      <p class="note">Preview: blocks and the folder header are still being built; the agent panel and approval card work today.</p>
     </div>
 
     <section aria-labelledby="what">
@@ -277,6 +277,7 @@ npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="but
           <div>
             <p class="step-title">Run it</p>
             <div class="cmdline"><code>blockterm</code><button type="button" aria-label="Copy the run command">Copy</button></div>
+            <p class="soon">Update later with <code>blockterm update</code>.</p>
           </div>
         </li>
       </ol>
@@ -284,7 +285,7 @@ npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="but
 
     <section aria-labelledby="agent">
       <h2 id="agent">Set up the agent</h2>
-      <p class="section-lede">Coming with the agent releases. This is the planned setup, so details may still change. Today's build doesn't have these commands yet.</p>
+      <p class="section-lede">These steps work in today's build. Details may still change.</p>
       <ol class="steps">
         <li>
           <div>
@@ -338,15 +339,15 @@ npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="but
             <li><span class="mark ok">✔</span><span>Your shell inside blockterm's frame on Windows, macOS and Linux</span></li>
             <li><span class="mark ok">✔</span><span>vim, less, ssh and other full-screen programs</span></li>
             <li><span class="mark ok">✔</span><span>Mouse, paste, resizing, emoji and CJK text</span></li>
+            <li><span class="mark ok">✔</span><span>The agent panel, with approval for every keystroke</span></li>
+            <li><span class="mark ok">✔</span><span><code>blockterm setup</code> and <code>blockterm doctor</code></span></li>
           </ul>
         </div>
         <div>
           <p class="step-title">In progress</p>
           <ul class="status">
             <li><span class="mark dim-ink">○</span><span>Blocks for each command</span></li>
-            <li><span class="mark dim-ink">○</span><span>The agent panel, with approval for every keystroke</span></li>
             <li><span class="mark dim-ink">○</span><span><code>#</code> suggestions and Explain error</span></li>
-            <li><span class="mark dim-ink">○</span><span><code>blockterm setup</code> and <code>blockterm doctor</code></span></li>
           </ul>
         </div>
       </div>

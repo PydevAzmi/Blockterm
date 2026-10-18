@@ -456,3 +456,41 @@ The footer status is appended after `FOOTER`, two spaces later.
   - **acceptance.md:** a section "Agent (slices 3–5)" with owner checks: real Anthropic key; ssh to a host, ask about a failed service, approve one command; vim, ask for an edit, approve; deny with a reason; type a sudo password while a card is pending.
   - **site:** in the Status lists, move "The agent panel…" and "`blockterm setup` and `blockterm doctor`" to Works today; change the hero note to say the agent preview matches the current build; update the "Set up the agent" section's lede so it no longer says the commands are coming.
 - [ ] **Step 5: Commit:** `test: agent end to end via openai-compatible; docs and site`
+
+### Task 10: `blockterm update`
+
+Added at the owner's request ("a task for simple update"). This is a manual command, not an update *check*: spec §3 still rules out automatic update checks.
+
+**Files:**
+- Create `src/update.ts`, `tests/update.test.ts`.
+- Modify `src/cli.ts`, `tests/cli.test.ts`, `README.md`, `site/index.html` (install section: one line, "Update later with `blockterm update`").
+
+**Interfaces:**
+- Consumes: `parseArgs` (cli)
+- Produces:
+
+```ts
+export type InstallKind = { kind: 'git'; root: string } | { kind: 'npm' };
+export function detectInstall(cliFile: string, exists: (p: string) => boolean): InstallKind; // git when a .git folder exists at the package root (dirname of dist/)
+export interface Step { cmd: string; args: string[] }
+export function updateSteps(install: InstallKind): Step[];
+export async function runUpdate(o: { install: InstallKind; run: (step: Step, cwd: string) => Promise<number>; print: (line: string) => void }): Promise<number>;
+```
+
+- [ ] **Step 1: Write the failing tests:**
+  - **`parseArgs`:** `parseArgs(['update'])` gives `{ kind: 'update' }`.
+  - **`detectInstall`:** with `exists` returning true for `<root>/.git` gives `{ kind: 'git', root }`, where root is the parent of `dist`; otherwise `{ kind: 'npm' }`.
+  - **`updateSteps({ kind: 'git' })`:**
+    - gives `git pull --ff-only`, then `npm install`, then `npm run build`;
+    - on win32, `npm` is spawned as `npm.cmd`.
+  - **`updateSteps({ kind: 'npm' })`:** gives `npm install -g blockterm@latest`.
+  - **`runUpdate`:**
+    - runs the steps in order;
+    - stops at the first non-zero exit and returns that code;
+    - prints `$ <cmd> <args>` before each step;
+    - on success prints `blockterm is up to date. Restart any open blockterm windows.`;
+    - a failed `git pull --ff-only` also prints `Local changes or a diverged branch stopped the update. Commit or stash them, then run blockterm update again.`
+- [ ] **Step 2: Run** the tests. Expect: FAIL.
+- [ ] **Step 3: Implement.** The real `run` uses `child_process.spawn` with `stdio: 'inherit'` and `cwd: root`. The command does not touch the host terminal: it runs before `runApp`, like `setup` and `doctor`.
+- [ ] **Step 4: Run** the full suite and typecheck. Expect: PASS. Update the README and the site's install line.
+- [ ] **Step 5: Commit:** `feat: blockterm update`

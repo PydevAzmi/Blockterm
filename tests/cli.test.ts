@@ -1,11 +1,14 @@
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 
 import { expect, test } from 'vitest';
 
-import { isMain, parseArgs, shellExists } from '../src/cli.js';
+import { createIo, isMain, parseArgs, shellExists } from '../src/cli.js';
+import { loadConfig } from '../src/config.js';
+import { runSetup } from '../src/setup.js';
 
 test('no args runs with the default shell', () =>
   expect(parseArgs([])).toEqual({ kind: 'run' }));
@@ -30,6 +33,53 @@ test('--shell without a path is an error', () =>
 
 test('unknown option is an error', () =>
   expect(parseArgs(['--nope'])).toEqual({ kind: 'error', message: 'unknown option: --nope' }));
+
+test('setup is a subcommand', () =>
+  expect(parseArgs(['setup'])).toEqual({ kind: 'setup' }));
+
+test('doctor is a subcommand', () =>
+  expect(parseArgs(['doctor'])).toEqual({ kind: 'doctor' }));
+
+test('update is a subcommand', () =>
+  expect(parseArgs(['update'])).toEqual({ kind: 'update' }));
+
+test('setup with an extra argument is an error', () =>
+  expect(parseArgs(['setup', 'x'])).toEqual({ kind: 'error', message: 'unexpected argument: x' }));
+
+test('createIo reads piped lines through a queue', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'blockterm-io-'));
+  const input = new PassThrough();
+  const output = new PassThrough();
+  try {
+    input.write('1\nclaude-haiku-5-5\n\n');
+    const io = createIo(input, output);
+    const path = join(dir, 'config.json');
+    const config = await runSetup(io, path, null);
+    expect(config).toEqual({
+      provider: '@ai-sdk/anthropic',
+      model: 'claude-haiku-5-5',
+      apiKeyEnv: 'ANTHROPIC_API_KEY',
+      baseURL: null,
+      name: null,
+      shell: null,
+    });
+    expect(loadConfig(path)).toEqual({ ok: true, config });
+    io.close();
+  } finally {
+    input.end();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('createIo resolves the default when the stream closes with no line', async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const io = createIo(input, output);
+  const answer = io.ask('Model', 'default-model');
+  input.end();
+  expect(await answer).toBe('default-model');
+  io.close();
+});
 
 test('shellExists checks a path with a separator on disk', () => {
   expect(shellExists('/opt/custom/sh', {}, 'linux', () => true)).toBe(true);

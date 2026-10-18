@@ -70,6 +70,15 @@ function startApp(): { run: Promise<number>; pty: FakePty; stdin: FakeStdin; std
   return { run, pty, stdin, stdout };
 }
 
+test('runApp silences the AI SDK warning logger', async () => {
+  globalThis.AI_SDK_LOG_WARNINGS = true;
+  const { run, pty } = startApp();
+  expect(globalThis.AI_SDK_LOG_WARNINGS).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
 test('a pending resize debounce suppresses old-size frames', async () => {
   const { run, pty, stdout } = startApp();
 

@@ -601,6 +601,9 @@ installs the packed tarball (`npm pack`) on clean runners to prove no compiler i
 8. **Release.** Packaging (node-pty prebuilds), README, CI matrix with the clean install, landing page,
    release doc, first publish.
 
+Slices 3–5 (config, agent read only, agent writes) were built before slice 2 (blocks) at the owner's
+request, so the agent path could be proven end to end first.
+
 ## 11. Left to the builder
 
 - Internal module boundaries and file layout. Keep these modules testable without each other: PTY plus

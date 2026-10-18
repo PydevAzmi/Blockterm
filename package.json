@@ -17,8 +17,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.82",
+    "@ai-sdk/openai": "4.0.96",
+    "@ai-sdk/openai-compatible": "3.0.71",
     "@xterm/addon-unicode11": "0.9.0",
     "@xterm/headless": "^6.0.0",
+    "ai": "7.0.143",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {

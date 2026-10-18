@@ -1,17 +1,33 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
-import { runApp } from './app.js';
-import { isOnPath, resolveShell } from './shell.js';
+import { configPath, loadConfig } from './config.js';
+import { runDoctor } from './doctor.js';
+import { type Io, runSetup } from './setup.js';
+import { isOnPath, resolveShell, shellExists } from './shell.js';
+import { detectInstall, runUpdate, spawnStep } from './update.js';
+
+export { shellExists };
 
 export type Cli =
   | { kind: 'version' }
   | { kind: 'help' }
   | { kind: 'run'; shell?: string }
+  | { kind: 'setup' }
+  | { kind: 'doctor' }
+  | { kind: 'update' }
   | { kind: 'error'; message: string };
 
 export function parseArgs(argv: string[]): Cli {
+  const sub = argv[0];
+  if (sub === 'setup' || sub === 'doctor' || sub === 'update') {
+    if (argv.length > 1) return { kind: 'error', message: `unexpected argument: ${argv[1]}` };
+    return { kind: sub };
+  }
+
   let shell: string | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -43,7 +59,12 @@ export function isMain(argv1: string | undefined, metaUrl: string): boolean {
 }
 
 const HELP = [
-  'usage: blockterm [--shell <path>] [--version] [--help]',
+  'usage: blockterm [setup | doctor | update] [--shell <path>] [--version] [--help]',
+  '',
+  'commands:',
+  '  setup           choose the model and save the config',
+  '  doctor          check node, pty, shell, config, key and model',
+  '  update          update blockterm itself (git pull or npm), then rebuild',
   '',
   'options:',
   '  --shell <path>  run the given shell instead of the default',
@@ -62,14 +83,106 @@ function hasSize(stdout: NodeJS.WriteStream): boolean {
   return typeof stdout.columns === 'number' && typeof stdout.rows === 'number';
 }
 
-export function shellExists(
-  file: string,
-  env: Record<string, string | undefined>,
-  platform: NodeJS.Platform,
-  exists: (p: string) => boolean = existsSync,
-): boolean {
-  if (file.includes('/') || file.includes('\\')) return exists(file);
-  return isOnPath(file, env, platform);
+export interface ReadlineIo extends Io {
+  close(): void;
+}
+
+export function createIo(
+  input: NodeJS.ReadableStream,
+  output: NodeJS.WritableStream,
+): ReadlineIo {
+  const rl = createInterface({ input, output });
+  const buffered: string[] = [];
+  let pending: ((line: string) => void) | null = null;
+  let closed = false;
+
+  rl.on('line', line => {
+    if (pending !== null) {
+      const resolve = pending;
+      pending = null;
+      resolve(line);
+    } else {
+      buffered.push(line);
+    }
+  });
+
+  rl.on('close', () => {
+    closed = true;
+    if (pending !== null) {
+      const resolve = pending;
+      pending = null;
+      resolve('');
+    }
+  });
+
+  return {
+    ask: (question, def) => {
+      rl.setPrompt(def === undefined ? `${question}: ` : `${question} [${def}]: `);
+      rl.prompt();
+      return new Promise<string>(resolve => {
+        const finish = (line: string): void => {
+          const answer = line.trim();
+          resolve(answer === '' && def !== undefined ? def : answer);
+        };
+        const next = buffered.shift();
+        if (next !== undefined) finish(next);
+        else if (closed) finish('');
+        else pending = finish;
+      });
+    },
+    print: line => {
+      output.write(`${line}\n`);
+    },
+    close: () => {
+      rl.close();
+    },
+  };
+}
+
+async function runSetupCommand(): Promise<void> {
+  const io = createIo(process.stdin, process.stdout);
+  try {
+    const path = process.env.BLOCKTERM_CONFIG || configPath(process.platform, process.env, homedir());
+    const loaded = loadConfig(path);
+    await runSetup(io, path, loaded.ok ? loaded.config : null);
+  } finally {
+    io.close();
+  }
+}
+
+async function runDoctorCommand(): Promise<number> {
+  const path = process.env.BLOCKTERM_CONFIG || configPath(process.platform, process.env, homedir());
+  const loaded = loadConfig(path);
+  const shell = resolveShell({
+    platform: process.platform,
+    env: process.env,
+    override: loaded.ok ? loaded.config.shell ?? undefined : undefined,
+    onPath: exe => isOnPath(exe, process.env, process.platform),
+  });
+
+  const checks = await runDoctor({
+    configPath: path,
+    env: process.env,
+    platform: process.platform,
+    shellFile: shell.file,
+  });
+
+  let failed = false;
+  for (const check of checks) {
+    if (!check.ok) failed = true;
+    process.stdout.write(`${check.ok ? '✔' : '✘'} ${check.name} — ${check.detail}\n`);
+  }
+  return failed ? 1 : 0;
+}
+
+async function runUpdateCommand(): Promise<number> {
+  const cliFile = fileURLToPath(import.meta.url);
+  const install = detectInstall(cliFile, existsSync);
+  return runUpdate({
+    install,
+    run: spawnStep,
+    print: line => process.stdout.write(`${line}\n`),
+  });
 }
 
 async function main(): Promise<void> {
@@ -88,6 +201,16 @@ async function main(): Promise<void> {
     process.stderr.write('try: blockterm --help\n');
     process.exit(2);
   }
+  if (cli.kind === 'setup') {
+    await runSetupCommand();
+    return;
+  }
+  if (cli.kind === 'doctor') {
+    process.exit(await runDoctorCommand());
+  }
+  if (cli.kind === 'update') {
+    process.exit(await runUpdateCommand());
+  }
 
   const { stdin, stdout } = process;
   if (!stdin.isTTY || !hasSize(stdout)) {
@@ -95,10 +218,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const path = process.env.BLOCKTERM_CONFIG || configPath(process.platform, process.env, homedir());
+  const loaded = loadConfig(path);
+  const configShell = loaded.ok ? loaded.config.shell : null;
   const shell = resolveShell({
     platform: process.platform,
     env: process.env,
-    override: cli.shell,
+    override: cli.shell ?? configShell ?? undefined,
     onPath: exe => isOnPath(exe, process.env, process.platform),
   });
 
@@ -108,7 +234,8 @@ async function main(): Promise<void> {
   }
 
   try {
-    const code = await runApp({ shell, stdin, stdout });
+    const { runApp } = await import('./app.js');
+    const code = await runApp({ shell, stdin, stdout, loadConfig: () => loaded });
     process.exit(code);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
