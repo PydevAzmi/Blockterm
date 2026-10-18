@@ -31,6 +31,15 @@ test('--shell without a path is an error', () =>
 test('unknown option is an error', () =>
   expect(parseArgs(['--nope'])).toEqual({ kind: 'error', message: 'unknown option: --nope' }));
 
+test('setup is a subcommand', () =>
+  expect(parseArgs(['setup'])).toEqual({ kind: 'setup' }));
+
+test('doctor is a subcommand', () =>
+  expect(parseArgs(['doctor'])).toEqual({ kind: 'doctor' }));
+
+test('setup with an extra argument is an error', () =>
+  expect(parseArgs(['setup', 'x'])).toEqual({ kind: 'error', message: 'unexpected argument: x' }));
+
 test('shellExists checks a path with a separator on disk', () => {
   expect(shellExists('/opt/custom/sh', {}, 'linux', () => true)).toBe(true);
   expect(shellExists('/opt/custom/sh', {}, 'linux', () => false)).toBe(false);

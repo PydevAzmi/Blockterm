@@ -62,3 +62,13 @@ export function resolveShell(o: {
 
   return { file: o.env.SHELL || '/bin/sh', args: [] };
 }
+
+export function shellExists(
+  file: string,
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform,
+  exists: (p: string) => boolean = existsSync,
+): boolean {
+  if (file.includes('/') || file.includes('\\')) return exists(file);
+  return isOnPath(file, env, platform);
+}

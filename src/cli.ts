@@ -1,17 +1,30 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { runApp } from './app.js';
-import { isOnPath, resolveShell } from './shell.js';
+import { configPath, loadConfig } from './config.js';
+import { runDoctor } from './doctor.js';
+import { type Io, runSetup } from './setup.js';
+import { isOnPath, resolveShell, shellExists } from './shell.js';
+
+export { shellExists };
 
 export type Cli =
   | { kind: 'version' }
   | { kind: 'help' }
   | { kind: 'run'; shell?: string }
+  | { kind: 'setup' }
+  | { kind: 'doctor' }
   | { kind: 'error'; message: string };
 
 export function parseArgs(argv: string[]): Cli {
+  if (argv[0] === 'setup' || argv[0] === 'doctor') {
+    if (argv.length > 1) return { kind: 'error', message: `unexpected argument: ${argv[1]}` };
+    return argv[0] === 'setup' ? { kind: 'setup' } : { kind: 'doctor' };
+  }
+
   let shell: string | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -43,7 +56,11 @@ export function isMain(argv1: string | undefined, metaUrl: string): boolean {
 }
 
 const HELP = [
-  'usage: blockterm [--shell <path>] [--version] [--help]',
+  'usage: blockterm [setup | doctor] [--shell <path>] [--version] [--help]',
+  '',
+  'commands:',
+  '  setup           choose the model and save the config',
+  '  doctor          check node, pty, shell, config, key and model',
   '',
   'options:',
   '  --shell <path>  run the given shell instead of the default',
@@ -62,14 +79,51 @@ function hasSize(stdout: NodeJS.WriteStream): boolean {
   return typeof stdout.columns === 'number' && typeof stdout.rows === 'number';
 }
 
-export function shellExists(
-  file: string,
-  env: Record<string, string | undefined>,
-  platform: NodeJS.Platform,
-  exists: (p: string) => boolean = existsSync,
-): boolean {
-  if (file.includes('/') || file.includes('\\')) return exists(file);
-  return isOnPath(file, env, platform);
+async function runSetupCommand(): Promise<void> {
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const io: Io = {
+    ask: async (question, def) => {
+      const label = def === undefined ? `${question}: ` : `${question} [${def}]: `;
+      const answer = (await rl.question(label)).trim();
+      return answer === '' && def !== undefined ? def : answer;
+    },
+    print: line => {
+      process.stdout.write(`${line}\n`);
+    },
+  };
+  try {
+    const path = configPath(process.platform, process.env, homedir());
+    const loaded = loadConfig(path);
+    await runSetup(io, path, loaded.ok ? loaded.config : null);
+  } finally {
+    rl.close();
+  }
+}
+
+async function runDoctorCommand(): Promise<number> {
+  const path = configPath(process.platform, process.env, homedir());
+  const loaded = loadConfig(path);
+  const shell = resolveShell({
+    platform: process.platform,
+    env: process.env,
+    override: loaded.ok ? loaded.config.shell ?? undefined : undefined,
+    onPath: exe => isOnPath(exe, process.env, process.platform),
+  });
+
+  const checks = await runDoctor({
+    configPath: path,
+    env: process.env,
+    platform: process.platform,
+    shellFile: shell.file,
+  });
+
+  let failed = false;
+  for (const check of checks) {
+    if (!check.ok) failed = true;
+    process.stdout.write(`${check.ok ? '✔' : '✘'} ${check.name} — ${check.detail}\n`);
+  }
+  return failed ? 1 : 0;
 }
 
 async function main(): Promise<void> {
@@ -88,6 +142,13 @@ async function main(): Promise<void> {
     process.stderr.write('try: blockterm --help\n');
     process.exit(2);
   }
+  if (cli.kind === 'setup') {
+    await runSetupCommand();
+    return;
+  }
+  if (cli.kind === 'doctor') {
+    process.exit(await runDoctorCommand());
+  }
 
   const { stdin, stdout } = process;
   if (!stdin.isTTY || !hasSize(stdout)) {
@@ -95,10 +156,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const path = configPath(process.platform, process.env, homedir());
+  const loaded = loadConfig(path);
+  const configShell = loaded.ok ? loaded.config.shell : null;
   const shell = resolveShell({
     platform: process.platform,
     env: process.env,
-    override: cli.shell,
+    override: cli.shell ?? configShell ?? undefined,
     onPath: exe => isOnPath(exe, process.env, process.platform),
   });
 
