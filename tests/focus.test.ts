@@ -152,6 +152,18 @@ test('agent-key with a pending card focuses the panel and keeps the card', () =>
   expect(r.actions).toEqual([]);
 });
 
+test('focus events go to the pty with terminal focus', () => {
+  const event: InputEvent = { type: 'focus', focused: true };
+  const r = reduce(initialUi(), event);
+  expect(r.actions).toEqual([{ type: 'to-pty', event }]);
+});
+
+test('focus events are dropped with panel focus', () => {
+  const event: InputEvent = { type: 'focus', focused: false };
+  const r = reduce(panel(), event);
+  expect(r.actions).toEqual([]);
+});
+
 test('mouse events are dropped with panel focus', () => {
   const event: InputEvent = { type: 'mouse', button: 0, col: 5, row: 5, action: 'press' };
   const r = reduce(panel(), event);

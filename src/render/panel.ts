@@ -1,3 +1,4 @@
+import { escapeControl } from '../agent/keys.js';
 import type { PanelUi } from '../focus.js';
 import type { Rect } from '../layout.js';
 import type { Cell } from './frame.js';
@@ -75,13 +76,13 @@ export function drawPanel(
   };
 
   const docked = rect.col > 1;
-  const innerCol = docked ? rect.col + 1 : rect.col;
+  const innerCol = rect.col;
   const innerCols = Math.max(0, docked ? rect.cols - 1 : rect.cols);
 
   for (let r = 0; r < rect.rows; r += 1) {
     const row = rect.row + r;
     for (let c = 0; c < rect.cols; c += 1) put(row, rect.col + c, ' ', 1, '');
-    if (docked) put(row, rect.col, '│', 1, '');
+    if (docked) put(row, rect.col + rect.cols - 1, '│', 1, '');
   }
 
   const writeRun = (row: number, col: number, text: string, sgr: string, max: number): number => {
@@ -96,19 +97,95 @@ export function drawPanel(
     return x;
   };
 
+  interface CardCell {
+    ch: string;
+    width: 0 | 1 | 2;
+    sgr: string;
+  }
+
+  const cellsFor = (text: string, sgr: string): CardCell[][] => {
+    const rows: CardCell[][] = [[]];
+    let used = 0;
+    for (const ch of Array.from(text)) {
+      const w = charWidth(ch);
+      if (used + w > innerCols && used > 0) {
+        rows.push([]);
+        used = 0;
+      }
+      const row = rows[rows.length - 1]!;
+      row.push({ ch, width: w, sgr });
+      if (w === 2) row.push({ ch: '', width: 0, sgr });
+      used += w;
+    }
+    return rows;
+  };
+
+  const drawCells = (row: number, col: number, rowCells: CardCell[]): void => {
+    let x = col;
+    for (const cell of rowCells) {
+      if (cell.width === 0) continue;
+      if (x - col + cell.width > innerCols) break;
+      put(row, x, cell.ch, cell.width, cell.sgr);
+      if (cell.width === 2) put(row, x + 1, '', 0, cell.sgr);
+      x += cell.width;
+    }
+  };
+
   const title = ui.model !== undefined && ui.model !== '' ? `agent · ${ui.model}` : 'agent';
   writeRun(rect.row, innerCol, title, '', innerCols);
 
   const inputRow = rect.row + rect.rows - 1;
-  const actionLines = card !== null ? wrapLine(CARD_ACTIONS, innerCols) : [];
-  const cardHeight = card !== null ? 2 + actionLines.length : 0;
+
+  let cardRows: CardCell[][] = [];
+  if (card !== null) {
+    cardRows = cellsFor(`Type into ${escapeControl(card.target)}`, AMBER);
+    const payload: CardCell[][] = [[]];
+    let used = 0;
+    for (const token of card.tokens) {
+      if (used > 0) {
+        if (used + 1 > innerCols) {
+          payload.push([]);
+          used = 0;
+        }
+        const sep = payload[payload.length - 1]!;
+        sep.push({ ch: ' ', width: 1, sgr: AMBER });
+        used += 1;
+      }
+      const text = token.kind === 'text' ? `"${token.label}"` : token.label;
+      const sgr = token.kind === 'key' ? AMBER_REVERSE : AMBER;
+      for (const ch of Array.from(text)) {
+        const w = charWidth(ch);
+        if (used + w > innerCols && used > 0) {
+          payload.push([]);
+          used = 0;
+        }
+        const row = payload[payload.length - 1]!;
+        row.push({ ch, width: w, sgr });
+        if (w === 2) row.push({ ch: '', width: 0, sgr });
+        used += w;
+      }
+    }
+    cardRows.push(...payload);
+    for (const line of wrapLine(CARD_ACTIONS, innerCols)) cardRows.push(...cellsFor(line, AMBER));
+  }
+
+  const cardBudget = Math.max(0, rect.rows - 2);
+  let cardShown = cardRows;
+  let more = 0;
+  if (cardRows.length > cardBudget) {
+    const keep = Math.max(0, cardBudget - 1);
+    more = cardRows.length - keep;
+    cardShown = cardRows.slice(0, keep);
+  }
+  const cardHeight = card !== null ? cardShown.length + (more > 0 ? 1 : 0) : 0;
+
   const transcriptTop = rect.row + 1;
   const available = Math.max(0, inputRow - cardHeight - transcriptTop);
 
   const lines: string[] = [];
   for (const entry of transcript) {
     for (const segment of `${entry.who}: ${entry.text}`.split('\n')) {
-      lines.push(...wrapLine(segment, innerCols));
+      lines.push(...wrapLine(escapeControl(segment), innerCols));
     }
   }
   const shown = lines.slice(Math.max(0, lines.length - available));
@@ -117,23 +194,16 @@ export function drawPanel(
   }
 
   if (card !== null) {
-    const cardTop = inputRow - cardHeight;
-    writeRun(cardTop, innerCol, `Type into ${card.target}`, AMBER, innerCols);
-    let x = innerCol;
-    const payloadRow = cardTop + 1;
-    for (const token of card.tokens) {
-      const remaining = (): number => innerCols - (x - innerCol);
-      const text = token.kind === 'text' ? `"${token.label}"` : token.label;
-      x = writeRun(payloadRow, x, text, token.kind === 'key' ? AMBER_REVERSE : AMBER, remaining());
-      x = writeRun(payloadRow, x, ' ', AMBER, remaining());
+    let row = inputRow - cardHeight;
+    for (const rowCells of cardShown) {
+      drawCells(row, innerCol, rowCells);
+      row += 1;
     }
-    for (let i = 0; i < actionLines.length; i += 1) {
-      writeRun(cardTop + 2 + i, innerCol, actionLines[i]!, AMBER, innerCols);
-    }
+    if (more > 0) writeRun(row, innerCol, `…(${more} more)`, AMBER, innerCols);
   }
 
   const inputX = writeRun(inputRow, innerCol, PROMPT, '', innerCols);
-  const endX = writeRun(inputRow, inputX, ui.input, '', innerCols - (inputX - innerCol));
+  const endX = writeRun(inputRow, inputX, escapeControl(ui.input), '', innerCols - (inputX - innerCol));
 
   if (ui.focus === 'panel') return { row: inputRow, col: endX };
   return null;

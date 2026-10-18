@@ -5,7 +5,7 @@ import type { LanguageModel, ModelMessage } from 'ai';
 import { displayTokens, parseKeys } from './agent/keys.js';
 import { runTask } from './agent/loop.js';
 import type { AgentEvent, Decision } from './agent/loop.js';
-import { createModel, keyHint } from './agent/model.js';
+import { createModel, keyHint, redact } from './agent/model.js';
 import type { ModelResult } from './agent/model.js';
 import { buildSystemPrompt } from './agent/prompt.js';
 import type { ToolContext } from './agent/tools.js';
@@ -123,6 +123,9 @@ export async function runApp(o: {
           frame.cursor = { row: cursor.row, col: cursor.col, visible: true };
         }
       }
+      if (layout.panel.mode === 'overlay' && ui.focus !== 'panel') {
+        frame.cursor.visible = false;
+      }
       const hostModes = hostModesFrom(session.mirror, trackedModes);
       const out = hostModeDiff(lastHostModes, hostModes) + renderDiff(lastFrame, frame);
       if (out !== '') stdout.write(out);
@@ -146,10 +149,9 @@ export async function runApp(o: {
 
     const applyLayout = (): void => {
       const next = computeLayout({ cols: stdout.columns, rows: stdout.rows }, ui.open);
-      const dockChanged = next.panel.mode !== layout.panel.mode;
       const sizeChanged = next.pty.cols !== layout.pty.cols || next.pty.rows !== layout.pty.rows;
       layout = next;
-      if (dockChanged || sizeChanged) session.resize(layout.pty);
+      if (sizeChanged) session.resize(layout.pty);
       lastFrame = null;
       requestRender();
     };
@@ -300,7 +302,20 @@ export async function runApp(o: {
           applyLayout();
           break;
         case 'submit':
-          void submit(action.text);
+          void submit(action.text).catch((error: unknown) => {
+            const key =
+              config === null || config.apiKeyEnv === ''
+                ? ''
+                : (process.env[config.apiKeyEnv] ?? '');
+            transcript.push({
+              who: 'error',
+              text: redact(error instanceof Error ? error.message : String(error), key === '' ? [] : [key]),
+            });
+            card = null;
+            pendingDecision = null;
+            ui = { ...ui, mode: 'idle', card: null };
+            requestRender();
+          });
           break;
         case 'cancel-task':
           abortTask();
@@ -312,6 +327,18 @@ export async function runApp(o: {
     };
 
     const handleEvent = (event: InputEvent): void => {
+      if (event.type === 'mouse' && layout.panel.mode === 'overlay') {
+        const rect = layout.panel.rect;
+        if (
+          rect !== null &&
+          event.row >= rect.row &&
+          event.row < rect.row + rect.rows &&
+          event.col >= rect.col &&
+          event.col < rect.col + rect.cols
+        ) {
+          return;
+        }
+      }
       const result = reduce(ui, event);
       ui = result.ui;
       if (ui.open && config === null && !configNoticeShown) {

@@ -155,10 +155,12 @@ async function until(fn: () => boolean, ms = 3000): Promise<void> {
 function startApp(o: {
   load?: () => LoadResult;
   model?: (c: Config) => ModelResult;
+  cols?: number;
+  rows?: number;
 }): { run: Promise<number>; pty: FakePty; stdin: FakeStdin; stdout: FakeStdout } {
   const pty = new FakePty();
   const stdin = new FakeStdin();
-  const stdout = new FakeStdout(80, 24);
+  const stdout = new FakeStdout(o.cols ?? 80, o.rows ?? 24);
   const run = runApp({
     shell: { file: 'fake-shell', args: [] },
     stdin: stdin as unknown as NodeJS.ReadStream,
@@ -257,6 +259,61 @@ test('ctrl+k never reaches the pty', async () => {
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   await wait(20);
   expect(pty.written.map(String).join('')).not.toContain('\x0b');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('opening the overlay does not resize the pty', async () => {
+  const { run, pty, stdin, stdout } = startApp({
+    load: () => LOADED,
+    model: okModel(sendKeysThenDone()),
+    cols: 90,
+    rows: 30,
+  });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  await wait(20);
+  expect(pty.resizes).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('mouse presses inside an open overlay never reach the pty', async () => {
+  const { run, pty, stdin, stdout } = startApp({
+    load: () => LOADED,
+    model: okModel(sendKeysThenDone()),
+    cols: 90,
+    rows: 30,
+  });
+
+  pty.emit('\x1b[?1000h');
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', '\x0b');
+  await wait(5);
+  stdin.emit('data', '\x1b[<0;10;5M');
+  await wait(20);
+  expect(pty.written).toHaveLength(0);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('a throwing model factory shows a redacted error and resets to idle', async () => {
+  const factory = (): ModelResult => {
+    throw new Error('boom sk-secretvalue123');
+  };
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: factory });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('error:'));
+  expect(output(stdout)).toContain('boom');
+  expect(output(stdout)).not.toContain('sk-secretvalue123');
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);

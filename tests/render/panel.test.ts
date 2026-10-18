@@ -1,15 +1,21 @@
 import { expect, test } from 'vitest';
 
+import xterm from '@xterm/headless';
+
 import { displayTokens, parseKeys } from '../../src/agent/keys.js';
 import { initialUi } from '../../src/focus.js';
 import type { PanelUi } from '../../src/focus.js';
+import { computeLayout } from '../../src/layout.js';
 import type { Cell } from '../../src/render/frame.js';
+import { FOOTER, composeFrame } from '../../src/render/frame.js';
 import { drawPanel } from '../../src/render/panel.js';
 import type { PanelView, Transcript } from '../../src/render/panel.js';
 
+const { Terminal } = xterm;
+
 const FRAME_COLS = 40;
 const RECT = { row: 1, col: 4, rows: 10, cols: 30 };
-const INNER_COL = 5;
+const INNER_COL = 4;
 const INNER_COLS = 29;
 const INPUT_ROW = RECT.row + RECT.rows - 1;
 
@@ -48,7 +54,7 @@ test('a long transcript line wraps within the inner width', () => {
   expect(first).toBe('agent: ' + 'x'.repeat(INNER_COLS - 'agent: '.length));
   const second = rowText(cs, RECT.row + 2).slice(INNER_COL, INNER_COL + INNER_COLS);
   expect(second).toBe('x'.repeat(INNER_COLS));
-  expect(cs[(RECT.row + 1) * FRAME_COLS + INNER_COL + INNER_COLS]!.ch).toBe(' ');
+  expect(cs[(RECT.row + 1) * FRAME_COLS + INNER_COL + INNER_COLS]!.ch).toBe('│');
 });
 
 test('the approval card is amber and shows key labels', () => {
@@ -62,6 +68,84 @@ test('the approval card is amber and shows key labels', () => {
   expect(text).toContain('⏎ Enter');
   expect(text).toContain('y approve  e edit  n deny  a');
   expect(text).toContain('allow for this task');
+});
+
+test('a long card payload wraps across rows without dropping characters', () => {
+  const cs = blank();
+  const rect = { row: 1, col: 2, rows: 10, cols: 36 };
+  const parsed = parseKeys('git commit -am "a fairly long commit message here"<Enter>');
+  const tokens = parsed.ok ? displayTokens(parsed.tokens) : [];
+  drawPanel(cs, FRAME_COLS, rect, ui({ model: 'm' }), [], { target: 'shell', tokens });
+  const inner = rect.col;
+  const all = Array.from({ length: rect.rows }, (_, i) =>
+    rowText(cs, rect.row + i).slice(inner, inner + rect.cols - 1),
+  ).join('');
+  expect(all).toContain('git commit -am "a fairly long commit message here"');
+  expect(all).toContain('⏎ Enter');
+});
+
+test('an oversized card shows a more marker instead of cutting silently', () => {
+  const cs = blank();
+  const rect = { row: 1, col: 2, rows: 4, cols: 36 };
+  const parsed = parseKeys('echo hi<Enter>');
+  const tokens = parsed.ok ? displayTokens(parsed.tokens) : [];
+  drawPanel(cs, FRAME_COLS, rect, ui({ model: 'm' }), [], { target: 'shell', tokens });
+  const all = Array.from({ length: rect.rows }, (_, i) =>
+    rowText(cs, rect.row + i).slice(rect.col, rect.col + rect.cols),
+  ).join('');
+  expect(all).toContain('more)');
+});
+
+test('the docked seam has a single border and keeps the outer border', () => {
+  const layout = computeLayout({ cols: 200, rows: 50 }, true);
+  expect(layout.panel.mode).toBe('docked');
+  const rect = layout.panel.rect!;
+  const mirror = new Terminal({
+    cols: layout.pty.cols,
+    rows: layout.pty.rows,
+    allowProposedApi: true,
+  });
+  const frame = composeFrame(
+    mirror,
+    layout,
+    { title: 'blockterm', footer: FOOTER, view: 'fullscreen' },
+    true,
+  );
+  drawPanel(frame.cells, frame.cols, rect, ui({ model: 'm' }), [], null);
+  const row = 5;
+  const text = frame.cells
+    .slice(row * frame.cols, (row + 1) * frame.cols)
+    .map(c => c.ch)
+    .join('');
+  const seam = text.slice(layout.origin.col + layout.pty.cols, rect.col + 1);
+  expect((seam.match(/│/g) ?? []).length).toBe(1);
+  expect(text[frame.cols - 1]).toBe('│');
+});
+
+test('transcript control characters are escaped, not written raw', () => {
+  const cs = blank();
+  drawPanel(cs, FRAME_COLS, RECT, ui({ model: 'm' }), [
+    { who: 'agent', text: 'a\x1b]52;c;ZXZpbA==\x07b' },
+  ], null);
+  const chars = cs.map(c => c.ch);
+  expect(chars).not.toContain('\x1b');
+  expect(chars).not.toContain('\x07');
+  expect(chars.join('')).toContain('\\x1b');
+});
+
+test('input and card target control characters are escaped', () => {
+  const cs = blank();
+  const parsed = parseKeys('x');
+  const tokens = parsed.ok ? displayTokens(parsed.tokens) : [];
+  drawPanel(cs, FRAME_COLS, RECT, ui({ model: 'm', input: 'a\x1bb' }), [], {
+    target: 'sh\x07ell',
+    tokens,
+  });
+  const chars = cs.map(c => c.ch);
+  expect(chars).not.toContain('\x1b');
+  expect(chars).not.toContain('\x07');
+  expect(chars.join('')).toContain('\\x1b');
+  expect(chars.join('')).toContain('\\x07');
 });
 
 test('returns the cursor after the input prompt when focused', () => {

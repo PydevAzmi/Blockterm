@@ -112,7 +112,7 @@ function isHidden(code: number): boolean {
   return false;
 }
 
-function escapeControl(value: string): string {
+export function escapeControl(value: string): string {
   let out = '';
   for (const ch of value) {
     const code = ch.codePointAt(0)!;
