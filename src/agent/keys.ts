@@ -86,10 +86,9 @@ const CURSOR_APP: Record<string, string> = {
 };
 
 function keyBytes(name: string, appCursor: boolean): string {
-  const simple = SIMPLE[name];
-  if (simple !== undefined) return simple;
-  const cursor = (appCursor ? CURSOR_APP : CURSOR_NORMAL)[name];
-  if (cursor !== undefined) return cursor;
+  if (Object.hasOwn(SIMPLE, name)) return SIMPLE[name]!;
+  const cursorMap = appCursor ? CURSOR_APP : CURSOR_NORMAL;
+  if (Object.hasOwn(cursorMap, name)) return cursorMap[name]!;
   const control = /^C-([a-z])$/.exec(name);
   if (control) return String.fromCharCode(control[1]!.charCodeAt(0) - 96);
   return '';
@@ -103,12 +102,26 @@ export function keysToBytes(tokens: KeyToken[], appCursor: boolean): string {
   return out;
 }
 
+function isHidden(code: number): boolean {
+  if (code >= 0x80 && code <= 0x9f) return true;
+  if (code === 0x061c || code === 0x200e || code === 0x200f) return true;
+  if (code >= 0x202a && code <= 0x202e) return true;
+  if (code >= 0x2066 && code <= 0x2069) return true;
+  if (code >= 0x200b && code <= 0x200d) return true;
+  if (code === 0x2028 || code === 0x2029 || code === 0xfeff) return true;
+  return false;
+}
+
 function escapeControl(value: string): string {
   let out = '';
   for (const ch of value) {
     const code = ch.codePointAt(0)!;
     if (code < 0x20 || code === 0x7f) {
       out += `\\x${code.toString(16).padStart(2, '0')}`;
+    } else if (code === 0x5c) {
+      out += '\\\\';
+    } else if (isHidden(code)) {
+      out += `\\u${code.toString(16).toUpperCase().padStart(4, '0')}`;
     } else {
       out += ch;
     }

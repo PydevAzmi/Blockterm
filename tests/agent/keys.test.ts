@@ -101,3 +101,30 @@ test('displayTokens: special key labels', () => {
   expect(displayTokens(tokens('<C-c>'))).toEqual([{ kind: 'key', label: '^C' }]);
   expect(displayTokens(tokens('<Space>'))).toEqual([{ kind: 'key', label: 'Space' }]);
 });
+
+test('displayTokens: escapes bidi controls as \\uXXXX uppercase hex', () =>
+  expect(displayTokens(tokens('x\u202Ey'))).toEqual([
+    { kind: 'text', label: 'x\\u202Ey' },
+  ]));
+
+test('displayTokens: escapes C1 controls as \\uXXXX', () =>
+  expect(displayTokens(tokens('\u0085'))).toEqual([
+    { kind: 'text', label: '\\u0085' },
+  ]));
+
+test('displayTokens: escapes zero-width and separators as \\uXXXX', () =>
+  expect(displayTokens(tokens('\u200B'))).toEqual([
+    { kind: 'text', label: '\\u200B' },
+  ]));
+
+test('displayTokens: escapes a literal backslash so \\xNN is unambiguous', () =>
+  expect(displayTokens(tokens('a\\x0ab'))).toEqual([
+    { kind: 'text', label: 'a\\\\x0ab' },
+  ]));
+
+test('parseKeys: a prototype name is an unknown key', () =>
+  expect(parseKeys('<constructor>')).toEqual({
+    ok: false,
+    message: 'unknown key <constructor>',
+  }));
+
