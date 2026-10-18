@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { generateText, isStepCount, jsonSchema } from 'ai';
 import type { LanguageModel } from 'ai';
 
@@ -89,7 +91,7 @@ export async function runDoctor(o: {
   if (o.modelOverride !== undefined) {
     model = o.modelOverride;
   } else {
-    const created = createModel(config, o.env);
+    const created = createModel(config, o.env, { sessionId: randomUUID() });
     if (!created.ok) {
       checks.push({ name: 'model', ok: false, detail: `set ${created.missingKeyEnv}` });
       return checks;

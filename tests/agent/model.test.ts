@@ -1,3 +1,4 @@
+import { generateText } from 'ai';
 import type { LanguageModel } from 'ai';
 
 import { expect, test } from 'vitest';
@@ -16,7 +17,48 @@ const anthropic: Config = {
   baseURL: null,
   name: null,
   shell: null,
+  headers: null,
+  sessionHeader: null,
 };
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function textCompletion(): unknown {
+  return {
+    id: 'chatcmpl-1',
+    object: 'chat.completion',
+    created: 0,
+    model: 'local-model',
+    choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  };
+}
+
+function spyFetch(seen: Record<string, string>[]): typeof fetch {
+  return (async (_input: unknown, init?: RequestInit) => {
+    seen.push(Object.fromEntries(new Headers(init?.headers).entries()));
+    return jsonResponse(textCompletion());
+  }) as typeof fetch;
+}
+
+function openaiCompatible(over: Partial<Config> = {}): Config {
+  return {
+    provider: '@ai-sdk/openai-compatible',
+    model: 'local-model',
+    apiKeyEnv: '',
+    baseURL: 'http://localhost:1234/v1',
+    name: 'local',
+    shell: null,
+    headers: null,
+    sessionHeader: null,
+    ...over,
+  };
+}
 
 test('createModel: anthropic returns a model for the configured id', () => {
   const result = createModel(anthropic, { ANTHROPIC_API_KEY: 'key' });
@@ -36,18 +78,55 @@ test('createModel: openai returns an openai provider', () => {
 });
 
 test('createModel: openai-compatible uses the configured name', () => {
-  const config: Config = {
-    provider: '@ai-sdk/openai-compatible',
-    model: 'local-model',
-    apiKeyEnv: '',
-    baseURL: 'http://localhost:1234/v1',
-    name: 'local',
-    shell: null,
-  };
-  const result = createModel(config, {});
+  const result = createModel(openaiCompatible(), {});
   expect(result.ok).toBe(true);
   if (!result.ok) return;
   expect(meta(result.model).provider?.startsWith('local')).toBe(true);
+});
+
+test('createModel: sends static headers and the configured session header', async () => {
+  const seen: Record<string, string>[] = [];
+  const config = openaiCompatible({
+    headers: { 'X-App': 'blockterm' },
+    sessionHeader: 'x-opencode-session',
+  });
+  const result = createModel(config, {}, { sessionId: 'sess-123', fetch: spyFetch(seen) });
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  await generateText({ model: result.model, prompt: 'hi' });
+
+  expect(seen).toHaveLength(1);
+  expect(seen[0]).toMatchObject({
+    'x-app': 'blockterm',
+    'x-opencode-session': 'sess-123',
+  });
+});
+
+test('createModel: generates a session id when none is given', async () => {
+  const seen: Record<string, string>[] = [];
+  const config = openaiCompatible({ sessionHeader: 'x-opencode-session' });
+  const result = createModel(config, {}, { fetch: spyFetch(seen) });
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  await generateText({ model: result.model, prompt: 'hi' });
+
+  expect(seen).toHaveLength(1);
+  expect(seen[0]?.['x-opencode-session']).toMatch(/^[0-9a-f-]{36}$/);
+});
+
+test('createModel: sends no custom headers when none are configured', async () => {
+  const seen: Record<string, string>[] = [];
+  const result = createModel(openaiCompatible(), {}, { fetch: spyFetch(seen) });
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  await generateText({ model: result.model, prompt: 'hi' });
+
+  expect(seen).toHaveLength(1);
+  expect(seen[0]?.['x-opencode-session']).toBeUndefined();
+  expect(seen[0]?.['x-app']).toBeUndefined();
 });
 
 test('createModel: missing key reports the env var', () => {

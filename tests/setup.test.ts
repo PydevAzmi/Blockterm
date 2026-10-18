@@ -44,6 +44,8 @@ const anthropic: Config = {
   baseURL: null,
   name: null,
   shell: null,
+  headers: null,
+  sessionHeader: null,
 };
 
 test('runSetup: picks provider, model and the default key env', async () => {
@@ -59,6 +61,8 @@ test('runSetup: picks provider, model and the default key env', async () => {
     baseURL: null,
     name: null,
     shell: null,
+    headers: null,
+    sessionHeader: null,
   });
   expect(loadConfig(path)).toEqual({ ok: true, config });
   expect(lines.some(line => line.includes(path))).toBe(true);
@@ -91,6 +95,8 @@ test('runSetup: openai-compatible asks Base URL and Name, and re-asks an empty N
     baseURL: 'http://localhost:1234/v1',
     name: 'local',
     shell: null,
+    headers: null,
+    sessionHeader: null,
   });
   expect(questions.filter(question => question.startsWith('Base URL'))).toHaveLength(1);
   expect(questions.filter(question => question.startsWith('Name'))).toHaveLength(2);
@@ -126,6 +132,8 @@ test('runSetup: a changed provider resets baseURL, name and key env defaults', a
     baseURL: 'http://localhost:1234/v1',
     name: 'local',
     shell: 'C:\\bin\\sh.exe',
+    headers: null,
+    sessionHeader: null,
   };
   const { io } = scripted(['1', 'claude-haiku-5-5', '']);
 
@@ -138,7 +146,43 @@ test('runSetup: a changed provider resets baseURL, name and key env defaults', a
     baseURL: null,
     name: null,
     shell: 'C:\\bin\\sh.exe',
+    headers: null,
+    sessionHeader: null,
   });
+});
+
+test('runSetup: an opencode.ai /inference/go URL sets the session header', async () => {
+  const path = join(tempDir(), 'config.json');
+  const { io, lines } = scripted([
+    '3',
+    'go-model',
+    '',
+    'https://opencode.ai/inference/go/openai/v1',
+    'go',
+  ]);
+
+  const config = await runSetup(io, path, null);
+
+  expect(config.baseURL).toBe('https://opencode.ai/inference/go/openai/v1');
+  expect(config.sessionHeader).toBe('x-opencode-session');
+  expect(lines).toContain('OpenCode Go: sending x-opencode-session');
+});
+
+test('runSetup: strips /chat/completions from the base URL', async () => {
+  const path = join(tempDir(), 'config.json');
+  const { io, lines } = scripted([
+    '3',
+    'local-model',
+    '',
+    'http://localhost:1234/v1/chat/completions',
+    'local',
+  ]);
+
+  const config = await runSetup(io, path, null);
+
+  expect(config.baseURL).toBe('http://localhost:1234/v1');
+  expect(config.sessionHeader).toBeNull();
+  expect(lines).toContain('removed /chat/completions — the SDK adds it');
 });
 
 test('runSetup: an existing config supplies the defaults on a re-run', async () => {

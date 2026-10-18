@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
@@ -9,9 +11,26 @@ export type ModelResult =
   | { ok: true; model: LanguageModel; label: string }
   | { ok: false; missingKeyEnv: string };
 
+export interface CreateModelOptions {
+  sessionId?: string;
+  fetch?: typeof globalThis.fetch;
+}
+
+function buildHeaders(
+  config: Config,
+  sessionId: string | undefined,
+): Record<string, string> | undefined {
+  const headers: Record<string, string> = { ...(config.headers ?? {}) };
+  if (config.sessionHeader !== null && config.sessionHeader !== '') {
+    headers[config.sessionHeader] = sessionId ?? randomUUID();
+  }
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
 export function createModel(
   config: Config,
   env: Record<string, string | undefined>,
+  opts: CreateModelOptions = {},
 ): ModelResult {
   const requiresKey = config.apiKeyEnv !== '';
   const apiKey = requiresKey ? env[config.apiKeyEnv] : undefined;
@@ -19,11 +38,16 @@ export function createModel(
     return { ok: false, missingKeyEnv: config.apiKeyEnv };
   }
 
+  const headers = buildHeaders(config, opts.sessionId);
+  const fetch = opts.fetch;
+
   switch (config.provider) {
     case '@ai-sdk/anthropic': {
       const provider = createAnthropic({
         apiKey,
         ...(config.baseURL !== null ? { baseURL: config.baseURL } : {}),
+        ...(headers !== undefined ? { headers } : {}),
+        ...(fetch !== undefined ? { fetch } : {}),
       });
       return { ok: true, model: provider(config.model), label: config.model };
     }
@@ -31,6 +55,8 @@ export function createModel(
       const provider = createOpenAI({
         apiKey,
         ...(config.baseURL !== null ? { baseURL: config.baseURL } : {}),
+        ...(headers !== undefined ? { headers } : {}),
+        ...(fetch !== undefined ? { fetch } : {}),
       });
       return { ok: true, model: provider(config.model), label: config.model };
     }
@@ -39,6 +65,8 @@ export function createModel(
         name: config.name ?? '',
         baseURL: config.baseURL ?? '',
         apiKey,
+        ...(headers !== undefined ? { headers } : {}),
+        ...(fetch !== undefined ? { fetch } : {}),
       });
       return { ok: true, model: provider(config.model), label: config.model };
     }

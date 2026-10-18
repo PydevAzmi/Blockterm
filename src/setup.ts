@@ -1,5 +1,17 @@
 import type { Config, ProviderPackage } from './config.js';
-import { defaultKeyEnv, saveConfig } from './config.js';
+import { defaultKeyEnv, normalizeBaseURL, saveConfig } from './config.js';
+
+const OPENCODE_GO_HEADER = 'x-opencode-session';
+
+function isOpenCodeGo(url: string | null): boolean {
+  if (url === null) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.host === 'opencode.ai' && parsed.pathname.includes('/inference/go');
+  } catch {
+    return false;
+  }
+}
 
 export interface Io {
   ask(question: string, def?: string): Promise<string>;
@@ -58,6 +70,8 @@ export async function runSetup(io: Io, path: string, existing: Config | null): P
 
   let baseURL = keep ? existing.baseURL : null;
   let name = keep ? existing.name : null;
+  let headers = keep ? existing.headers : null;
+  let sessionHeader = keep ? existing.sessionHeader : null;
 
   if (provider === '@ai-sdk/openai-compatible') {
     for (;;) {
@@ -68,6 +82,15 @@ export async function runSetup(io: Io, path: string, existing: Config | null): P
         break;
       }
       io.print('a base URL is required');
+    }
+    const normalized = baseURL === null ? null : normalizeBaseURL(baseURL);
+    if (normalized !== null && normalized !== baseURL) {
+      baseURL = normalized;
+      io.print('removed /chat/completions — the SDK adds it');
+    }
+    if (isOpenCodeGo(baseURL)) {
+      sessionHeader = OPENCODE_GO_HEADER;
+      io.print('OpenCode Go: sending x-opencode-session');
     }
     for (;;) {
       const answer = (await io.ask('Name', name ?? undefined)).trim();
@@ -87,6 +110,8 @@ export async function runSetup(io: Io, path: string, existing: Config | null): P
     baseURL,
     name,
     shell: existing?.shell ?? null,
+    headers,
+    sessionHeader,
   };
 
   saveConfig(path, config);

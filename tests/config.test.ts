@@ -20,6 +20,8 @@ const anthropic: Config = {
   baseURL: null,
   name: null,
   shell: null,
+  headers: null,
+  sessionHeader: null,
 };
 
 test('validateConfig: accepts a full anthropic config', () =>
@@ -61,7 +63,55 @@ test('validateConfig: accepts openai-compatible with empty apiKeyEnv', () =>
       baseURL: 'http://localhost:1234',
       name: 'local',
       shell: null,
+      headers: null,
+      sessionHeader: null,
     },
+  }));
+
+test('validateConfig: accepts headers and a sessionHeader', () =>
+  expect(
+    validateConfig({
+      ...anthropic,
+      headers: { 'X-App': 'blockterm', 'x-trace-id': 'abc' },
+      sessionHeader: 'x-opencode-session',
+    }),
+  ).toEqual({
+    ok: true,
+    config: {
+      ...anthropic,
+      headers: { 'X-App': 'blockterm', 'x-trace-id': 'abc' },
+      sessionHeader: 'x-opencode-session',
+    },
+  }));
+
+test('validateConfig: rejects headers that are not an object', () =>
+  expect(validateConfig({ ...anthropic, headers: 'nope' }).ok).toBe(false));
+
+test('validateConfig: rejects a header value that is not a string', () =>
+  expect(validateConfig({ ...anthropic, headers: { 'X-A': 42 } }).ok).toBe(false));
+
+test('validateConfig: rejects an invalid header name and never echoes the value', () => {
+  const r = validateConfig({ ...anthropic, headers: { 'Bad Header': 'sk-secretvalue123' } });
+  expect(r.ok).toBe(false);
+  expect(JSON.stringify(r)).not.toContain('sk-secretvalue123');
+});
+
+test('validateConfig: rejects an invalid sessionHeader and never echoes it', () => {
+  const r = validateConfig({ ...anthropic, sessionHeader: 'not a header' });
+  expect(r.ok).toBe(false);
+  expect(JSON.stringify(r)).not.toContain('not a header');
+});
+
+test('validateConfig: strips a trailing /chat/completions from baseURL', () =>
+  expect(validateConfig({ ...anthropic, baseURL: 'https://x/v1/chat/completions' })).toEqual({
+    ok: true,
+    config: { ...anthropic, baseURL: 'https://x/v1' },
+  }));
+
+test('validateConfig: strips /chat/completions even with a trailing slash', () =>
+  expect(validateConfig({ ...anthropic, baseURL: 'https://x/v1/chat/completions/' })).toEqual({
+    ok: true,
+    config: { ...anthropic, baseURL: 'https://x/v1' },
   }));
 
 test('validateConfig: fills missing optional fields with null', () =>

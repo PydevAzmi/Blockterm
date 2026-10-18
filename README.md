@@ -52,6 +52,40 @@ The agent reads whatever is on your screen — a remote shell, a vim buffer — 
 
 `BLOCKTERM_CONFIG=path` overrides the config file location.
 
+### Config file
+
+`blockterm setup` writes the config. You can also edit it by hand; unknown keys are ignored.
+
+| Field | Meaning |
+| --- | --- |
+| `provider` | `@ai-sdk/anthropic`, `@ai-sdk/openai` or `@ai-sdk/openai-compatible` |
+| `model` | the model id |
+| `apiKeyEnv` | name of the environment variable holding the key (`""` for no key) |
+| `baseURL` | endpoint for `@ai-sdk/openai-compatible`; a trailing `/chat/completions` is stripped (the SDK adds it) |
+| `name` | provider name for `@ai-sdk/openai-compatible` |
+| `shell` | shell override for the terminal |
+| `headers` | extra request headers, a map of header name to value (default `null`) |
+| `sessionHeader` | header name that carries one stable id per conversation (default `null`) |
+
+`baseURL` is normalized on load: if it ends with `/chat/completions` (with or without a trailing slash) the suffix is removed.
+
+`blockterm setup` detects OpenCode Go and sets `sessionHeader` for you. `headers` and `sessionHeader` apply to every provider. OpenCode Go rejects requests without an `x-opencode-session` header, so the agent sends one stable id for each conversation and `blockterm doctor` sends a fresh id.
+
+### OpenCode Go
+
+```json
+{
+  "provider": "@ai-sdk/openai-compatible",
+  "model": "your-model-id",
+  "apiKeyEnv": "OPENCODE_API_KEY",
+  "baseURL": "https://opencode.ai/inference/go/openai/v1",
+  "name": "opencode-go",
+  "shell": null,
+  "headers": null,
+  "sessionHeader": "x-opencode-session"
+}
+```
+
 ### Privacy
 
 When the agent reads your screen, the visible text and up to 500 lines of scrollback are sent to the provider you chose. Nothing is sent until you ask, and typed input only reaches your shell after you approve it.
