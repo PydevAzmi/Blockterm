@@ -62,6 +62,8 @@ test('createIo reads piped lines through a queue', async () => {
       baseURL: null,
       name: null,
       shell: null,
+      headers: null,
+      sessionHeader: null,
     });
     expect(loadConfig(path)).toEqual({ ok: true, config });
     io.close();

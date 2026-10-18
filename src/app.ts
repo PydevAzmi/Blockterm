@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 
 import type { LanguageModel, ModelMessage } from 'ai';
@@ -52,13 +53,16 @@ export async function runApp(o: {
     env: Record<string, string | undefined>,
   ) => TerminalSession;
   loadConfig?: () => LoadResult;
-  modelFactory?: (config: Config) => ModelResult;
+  modelFactory?: (config: Config, sessionId?: string) => ModelResult;
 }): Promise<number> {
   const { shell, stdin, stdout } = o;
   globalThis.AI_SDK_LOG_WARNINGS = false;
   const load = o.loadConfig ?? ((): LoadResult =>
     readConfigFile(configPath(process.platform, process.env, homedir())));
-  const factory = o.modelFactory ?? ((config: Config): ModelResult => createModel(config, process.env));
+  const factory =
+    o.modelFactory ??
+    ((config: Config, sessionId?: string): ModelResult =>
+      createModel(config, process.env, sessionId !== undefined ? { sessionId } : {}));
 
   stdin.setRawMode(true);
   stdin.setEncoding('utf8');
@@ -85,6 +89,7 @@ export async function runApp(o: {
     let pendingDecision: ((decision: Decision) => void) | null = null;
     let taskController: AbortController | null = null;
     let history: ModelMessage[] = [];
+    let sessionId: string | null = null;
     let configNoticeShown = false;
     let agentOpen = false;
     let stopped = false;
@@ -283,7 +288,8 @@ export async function runApp(o: {
       }
 
       if (model === null) {
-        const result = factory(config);
+        if (sessionId === null) sessionId = randomUUID();
+        const result = factory(config, sessionId);
         if (!result.ok) {
           missingKeyEnv = result.missingKeyEnv;
           transcript.push({ who: 'error', text: `Set ${result.missingKeyEnv}` });

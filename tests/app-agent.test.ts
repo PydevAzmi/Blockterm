@@ -70,6 +70,8 @@ const CONFIG: Config = {
   baseURL: null,
   name: null,
   shell: null,
+  headers: null,
+  sessionHeader: null,
 };
 
 const LOADED: LoadResult = { ok: true, config: CONFIG };
@@ -164,7 +166,7 @@ async function until(fn: () => boolean, ms = 3000): Promise<void> {
 
 function startApp(o: {
   load?: () => LoadResult;
-  model?: (c: Config) => ModelResult;
+  model?: (c: Config, sessionId?: string) => ModelResult;
   cols?: number;
   rows?: number;
 }): { run: Promise<number>; pty: FakePty; stdin: FakeStdin; stdout: FakeStdout } {
@@ -206,6 +208,25 @@ test('a submitted request reaches the model as a user message', async () => {
   stdin.emit('data', 'hello\r');
   await until(() => model.doStreamCalls.length >= 1);
   expect(JSON.stringify(model.doStreamCalls[0]?.prompt)).toContain('hello');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('the model factory receives a session id for the conversation', async () => {
+  const model = sendKeysThenDone();
+  const seen: (string | undefined)[] = [];
+  const factory = (_config: Config, sessionId?: string): ModelResult => {
+    seen.push(sessionId);
+    return { ok: true, model, label: CONFIG.model };
+  };
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: factory });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => seen.length >= 1);
+  expect(seen[0]).toMatch(/^[0-9a-f-]{36}$/);
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);

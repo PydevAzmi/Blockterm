@@ -29,7 +29,38 @@ const anthropic: Config = {
   baseURL: null,
   name: null,
   shell: null,
+  headers: null,
+  sessionHeader: null,
 };
+
+function completion(toolCall: boolean): unknown {
+  return {
+    id: 'chatcmpl-1',
+    object: 'chat.completion',
+    created: 0,
+    model: 'go-model',
+    choices: [
+      toolCall
+        ? {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                { id: 'c1', type: 'function', function: { name: 'ping', arguments: '{}' } },
+              ],
+            },
+            finish_reason: 'tool_calls',
+          }
+        : {
+            index: 0,
+            message: { role: 'assistant', content: 'done' },
+            finish_reason: 'stop',
+          },
+    ],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  };
+}
 
 function mockModel(callTool: boolean): LanguageModel {  let step = 0;
   const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
@@ -172,4 +203,45 @@ test('runDoctor: redacts the key value out of a provider error message', async (
   expect(model.ok).toBe(false);
   expect(model.detail).toContain('401');
   expect(model.detail).not.toContain('sk-secret-123');
+});
+
+test('runDoctor: the model check sends a session header', async () => {
+  const configPath = join(tempDir(), 'config.json');
+  saveConfig(configPath, {
+    provider: '@ai-sdk/openai-compatible',
+    model: 'go-model',
+    apiKeyEnv: '',
+    baseURL: 'http://opencode.test/v1',
+    name: 'go',
+    shell: null,
+    headers: null,
+    sessionHeader: 'x-opencode-session',
+  });
+
+  const seen: Record<string, string>[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+    seen.push(Object.fromEntries(new Headers(init?.headers).entries()));
+    const body = JSON.parse(String(init?.body ?? '{}')) as {
+      messages?: { role: string }[];
+    };
+    const hasTool = (body.messages ?? []).some(message => message.role === 'tool');
+    return new Response(JSON.stringify(completion(!hasTool)), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const checks = await runDoctor({ ...base, configPath, env: {} });
+    expect(checkNamed(checks, 'model')).toEqual({
+      name: 'model',
+      ok: true,
+      detail: 'tool calls work',
+    });
+    expect(seen.length).toBeGreaterThanOrEqual(1);
+    expect(seen[0]?.['x-opencode-session']).toMatch(/^[0-9a-f-]{36}$/);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

@@ -13,6 +13,14 @@ export interface Config {
   baseURL: string | null;
   name: string | null;
   shell: string | null;
+  headers: Record<string, string> | null;
+  sessionHeader: string | null;
+}
+
+const HEADER_NAME = /^[A-Za-z0-9-]+$/;
+
+export function normalizeBaseURL(url: string): string {
+  return url.replace(/\/chat\/completions\/?$/, '');
 }
 
 export type LoadResult =
@@ -78,19 +86,42 @@ export function validateConfig(raw: unknown): LoadResult {
     return invalid('apiKeyEnv must be an environment variable name');
   }
 
-  const baseURL = raw.baseURL === undefined ? null : raw.baseURL;
+  const rawBaseURL = raw.baseURL === undefined ? null : raw.baseURL;
   const name = raw.name === undefined ? null : raw.name;
   const shell = raw.shell === undefined ? null : raw.shell;
 
-  if (baseURL !== null && typeof baseURL !== 'string') return invalid('baseURL must be a string');
+  if (rawBaseURL !== null && typeof rawBaseURL !== 'string') return invalid('baseURL must be a string');
   if (name !== null && typeof name !== 'string') return invalid('name must be a string');
   if (shell !== null && typeof shell !== 'string') return invalid('shell must be a string');
+
+  const baseURL = rawBaseURL === null ? null : normalizeBaseURL(rawBaseURL);
+
+  const rawHeaders = raw.headers === undefined ? null : raw.headers;
+  let headers: Record<string, string> | null = null;
+  if (rawHeaders !== null) {
+    if (!isRecord(rawHeaders)) return invalid('headers must be an object of header names to strings');
+    headers = {};
+    for (const [key, value] of Object.entries(rawHeaders)) {
+      if (!HEADER_NAME.test(key) || typeof value !== 'string') {
+        return invalid('headers must be an object of header names to strings');
+      }
+      headers[key] = value;
+    }
+  }
+
+  const sessionHeader = raw.sessionHeader === undefined ? null : raw.sessionHeader;
+  if (sessionHeader !== null && (typeof sessionHeader !== 'string' || !HEADER_NAME.test(sessionHeader))) {
+    return invalid('sessionHeader must be a header name');
+  }
 
   if (pkg === '@ai-sdk/openai-compatible' && (!baseURL || !name)) {
     return invalid('baseURL and name are required for @ai-sdk/openai-compatible');
   }
 
-  return { ok: true, config: { provider: pkg, model, apiKeyEnv, baseURL, name, shell } };
+  return {
+    ok: true,
+    config: { provider: pkg, model, apiKeyEnv, baseURL, name, shell, headers, sessionHeader },
+  };
 }
 
 export function loadConfig(filePath: string): LoadResult {
