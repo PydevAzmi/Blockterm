@@ -3,7 +3,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ShellChoice } from '../shell.js';
-import { BASH_INTEGRATION, PWSH_INTEGRATION, ZSH_INTEGRATION } from './scripts.js';
+import {
+  BASH_INTEGRATION,
+  PWSH_INTEGRATION,
+  ZSH_ENV,
+  ZSH_INTEGRATION,
+  ZSH_LOGIN,
+  ZSH_PROFILE,
+  ZSH_RC_FOOTER,
+  ZSH_RC_HEADER,
+} from './scripts.js';
 
 export type ShellKind = 'bash' | 'zsh' | 'pwsh' | 'powershell' | 'other';
 
@@ -38,16 +47,10 @@ export interface Injection {
 
 const BASH_RC_PREFIX = 'if [ -r ~/.bashrc ]; then . ~/.bashrc; fi\n';
 
-function zshRcPrefix(): string {
-  return [
-    'if [ -n "${BLOCKTERM_ORIG_ZDOTDIR-}" ]; then',
-    '  ZDOTDIR="$BLOCKTERM_ORIG_ZDOTDIR"',
-    'else',
-    '  unset ZDOTDIR',
-    'fi',
-    '[ -f "${ZDOTDIR:-$HOME}/.zshrc" ] && source "${ZDOTDIR:-$HOME}/.zshrc"',
-    '',
-  ].join('\n');
+// Ruling AF: on win32 only Git for Windows / MSYS bash gets our rcfile; WSL and Cygwin bash
+// are left untouched (their paths and startup model differ).
+function isGitBash(file: string): boolean {
+  return /\\git\\|\\msys/i.test(file.replace(/\//g, '\\'));
 }
 
 // Git Bash / MSYS understands /c/x/y, not C:\x\y.
@@ -68,7 +71,12 @@ export function inject(
 ): Injection {
   const kind = shellKind(shell.file);
   const noop = (): void => {};
-  if (env.BLOCKTERM_NO_INTEGRATION === '1' || kind === 'powershell' || kind === 'other') {
+  const off =
+    env.BLOCKTERM_NO_INTEGRATION === '1' ||
+    kind === 'powershell' ||
+    kind === 'other' ||
+    (kind === 'bash' && process.platform === 'win32' && !isGitBash(shell.file));
+  if (off) {
     return { file: shell.file, args: shell.args, env: {}, cleanup: noop };
   }
 
@@ -86,13 +94,17 @@ export function inject(
   }
 
   if (kind === 'zsh') {
-    const zshrc = join(dir, '.zshrc');
     const orig = env.ZDOTDIR ?? '';
-    writeFileSync(zshrc, zshRcPrefix() + ZSH_INTEGRATION, { mode: 0o600 });
+    writeFileSync(join(dir, '.zshenv'), ZSH_ENV, { mode: 0o600 });
+    writeFileSync(join(dir, '.zprofile'), ZSH_PROFILE, { mode: 0o600 });
+    writeFileSync(join(dir, '.zlogin'), ZSH_LOGIN, { mode: 0o600 });
+    writeFileSync(join(dir, '.zshrc'), ZSH_RC_HEADER + ZSH_INTEGRATION + '\n' + ZSH_RC_FOOTER + '\n', {
+      mode: 0o600,
+    });
     return {
       file: shell.file,
       args: shell.args,
-      env: { ZDOTDIR: dir, BLOCKTERM_ORIG_ZDOTDIR: orig },
+      env: { ZDOTDIR: dir, BLOCKTERM_ZDOTDIR: dir, BLOCKTERM_ORIG_ZDOTDIR: orig },
       cleanup,
     };
   }

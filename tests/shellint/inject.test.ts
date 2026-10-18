@@ -33,9 +33,11 @@ test('shellKind recognises shells by basename without .exe', () => {
   expect(shellKind('fish')).toBe('other');
 });
 
+const BASH_FILE = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : '/bin/bash';
+
 test('bash injection uses --rcfile pointing at an existing script that is removed by cleanup', () => {
   const root = tempDir();
-  const inj = inject({ file: 'bash', args: [] }, {}, root);
+  const inj = inject({ file: BASH_FILE, args: [] }, {}, root);
   expect(inj.args[0]).toBe('--rcfile');
   const rc = inj.args[1]!;
   expect(existsSync(native(rc))).toBe(true);
@@ -43,11 +45,28 @@ test('bash injection uses --rcfile pointing at an existing script that is remove
   expect(existsSync(native(rc))).toBe(false);
 });
 
-test('zsh injection points ZDOTDIR at a temp dir with .zshrc and records the original', () => {
+test.skipIf(process.platform !== 'win32')('win32: only Git for Windows / MSYS bash is integrated', () => {
+  const wsl = inject({ file: 'C:\\Windows\\System32\\bash.exe', args: [] }, {}, tempDir());
+  expect(wsl.args).toEqual([]);
+  expect(wsl.env).toEqual({});
+  const cygwin = inject({ file: 'C:\\cygwin64\\bin\\bash.exe', args: [] }, {}, tempDir());
+  expect(cygwin.args).toEqual([]);
+  const msys = inject({ file: 'D:\\msys64\\usr\\bin\\bash.exe', args: [] }, {}, tempDir());
+  expect(msys.args[0]).toBe('--rcfile');
+  msys.cleanup();
+  const git = inject({ file: 'C:\\Program Files\\Git\\bin\\bash.exe', args: [] }, {}, tempDir());
+  expect(git.args[0]).toBe('--rcfile');
+  git.cleanup();
+});
+
+test('zsh injection points ZDOTDIR at a temp dir with the startup files and records the original', () => {
   const inj = inject({ file: '/bin/zsh', args: [] }, { ZDOTDIR: '/home/me/.config/zsh' }, tempDir());
   const zdotdir = inj.env.ZDOTDIR!;
   expect(zdotdir).toBeDefined();
-  expect(existsSync(join(zdotdir, '.zshrc'))).toBe(true);
+  for (const name of ['.zshenv', '.zprofile', '.zlogin', '.zshrc']) {
+    expect(existsSync(join(zdotdir, name))).toBe(true);
+  }
+  expect(inj.env.BLOCKTERM_ZDOTDIR).toBe(zdotdir);
   expect(inj.env.BLOCKTERM_ORIG_ZDOTDIR).toBe('/home/me/.config/zsh');
   inj.cleanup();
   expect(existsSync(zdotdir)).toBe(false);
@@ -82,8 +101,8 @@ test('pwsh path is quoted with doubled single quotes', () => {
 });
 
 test('BLOCKTERM_NO_INTEGRATION=1 returns the input unchanged', () => {
-  const inp = inject({ file: 'bash', args: ['-i'] }, { BLOCKTERM_NO_INTEGRATION: '1' }, tempDir());
-  expect(inp.file).toBe('bash');
+  const inp = inject({ file: BASH_FILE, args: ['-i'] }, { BLOCKTERM_NO_INTEGRATION: '1' }, tempDir());
+  expect(inp.file).toBe(BASH_FILE);
   expect(inp.args).toEqual(['-i']);
   expect(inp.env).toEqual({});
   inp.cleanup();
