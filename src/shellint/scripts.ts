@@ -38,10 +38,15 @@ if [ -z "\${BLOCKTERM_SHELL_INTEGRATION-}" ]; then
     local __blockterm_hist="\${HISTCMD-}"
     local __blockterm_ran="0"
     if [ "$__blockterm_prompt_done" = "1" ]; then
-      if [ -z "$__blockterm_hist" ] || [ "$__blockterm_hist" != "\${__blockterm_last_hist-}" ]; then
+      if [ "\${__blockterm_use_debug-0}" = "1" ]; then
+        if [ "\${__blockterm_debug_ran-0}" = "1" ]; then
+          __blockterm_ran="1"
+        fi
+      elif [ -z "$__blockterm_hist" ] || [ "$__blockterm_hist" != "\${__blockterm_last_hist-}" ]; then
         __blockterm_ran="1"
       fi
     fi
+    __blockterm_debug_ran="0"
     __blockterm_last_hist="$__blockterm_hist"
     __blockterm_prompt_done="1"
     __blockterm_in_command="0"
@@ -75,6 +80,7 @@ if [ -z "\${BLOCKTERM_SHELL_INTEGRATION-}" ]; then
       esac
       if [ "$__blockterm_in_command" = "0" ]; then
         __blockterm_in_command="1"
+        __blockterm_debug_ran="1"
         builtin printf '\\e]133;C\\a'
       fi
     }
@@ -268,6 +274,7 @@ if (-not $global:__blockterm_integrated) {
     return $result
   }
 
+  Import-Module PSReadLine -ErrorAction SilentlyContinue
   if (Get-Module -Name PSReadLine) {
     $global:__blockterm_has_psreadline = $true
     $global:__blockterm_original_readline = $function:PSConsoleHostReadLine
@@ -277,7 +284,7 @@ if (-not $global:__blockterm_integrated) {
       } else {
         ''
       }
-      if ($line -and $line.Trim().Length -gt 0) {
+      if ($line -and "$line".Trim().Length -gt 0) {
         $global:__blockterm_command_ran = $true
         [Console]::Write("$([char]27)]133;C$([char]7)")
       }

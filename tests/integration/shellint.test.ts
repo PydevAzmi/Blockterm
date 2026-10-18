@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -52,6 +53,21 @@ const pwshPath =
     : isOnPath('pwsh', process.env, process.platform)
       ? 'pwsh'
       : null;
+
+// PS0 only exists in bash >= 4.4 (macOS ships 3.2), so the ps0 variants must skip there.
+function bashSupportsPs0(file: string): boolean {
+  try {
+    const v = execFileSync(file, ['-c', 'echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}'], {
+      encoding: 'utf8',
+    }).trim();
+    const [major, minor] = v.split('.').map(n => Number.parseInt(n, 10));
+    return (major ?? 0) > 4 || ((major ?? 0) === 4 && (minor ?? 0) >= 4);
+  } catch {
+    return false;
+  }
+}
+
+const bashPs0 = bashPath !== null && bashSupportsPs0(bashPath);
 
 function screenText(session: TerminalSession): string {
   const buffer = session.mirror.buffer.active;
@@ -117,8 +133,25 @@ function stop(launched: Launched): void {
   launched.injection.cleanup();
 }
 
-async function driveRc(shellFile: string, rcName: string, extraEnv: Record<string, string> = {}): Promise<void> {
-  const { session, store, injection } = launch(shellFile, rcName, 'echo hello-rc\nfalse\n', extraEnv);
+// Diagnostic for CI: on failure print what the mirror actually showed and which blocks/marks were seen.
+function dump(launched: Launched, label: string): void {
+  const lines = screenText(launched.session).split('\n');
+  const blocks = launched.store.blocks.map(b => ({ command: b.command, exitCode: b.exitCode }));
+  console.log(
+    `\n=== ${label} FAILURE ===\n` +
+      `integrated=${launched.store.integrated} promptRow=${launched.store.promptRow} blocks=${JSON.stringify(blocks)}\n` +
+      `--- last 30 screen lines ---\n${lines.slice(-30).join('\n')}\n=== end ${label} ===`,
+  );
+}
+
+async function driveRc(
+  shellFile: string,
+  rcName: string,
+  rcContent: string,
+  extraEnv: Record<string, string> = {},
+): Promise<void> {
+  const { session, store, injection } = launch(shellFile, rcName, rcContent, extraEnv);
+  const launched = { session, store, injection };
   try {
     await waitFor(() => store.integrated && store.promptRow !== null, 20000);
 
@@ -135,14 +168,17 @@ async function driveRc(shellFile: string, rcName: string, extraEnv: Record<strin
     expect(second!.command).toContain('false');
     expect(second!.exitCode).toBe(1);
     expect(screenText(session)).toContain('hello-rc');
+  } catch (err) {
+    dump(launched, `driveRc ${shellFile}`);
+    throw err;
   } finally {
-    stop({ session, store, injection });
+    stop(launched);
   }
 }
 
-const BASH_MODES: { name: string; env: Record<string, string> }[] = [
-  { name: 'ps0', env: {} },
-  { name: 'debug', env: { BLOCKTERM_FORCE_BASH_DEBUG: '1' } },
+const BASH_MODES: { name: string; env: Record<string, string>; prelude: string }[] = [
+  { name: 'ps0', env: {}, prelude: '' },
+  { name: 'debug', env: { BLOCKTERM_FORCE_BASH_DEBUG: '1' }, prelude: 'set +o history\n' },
 ];
 
 function count(haystack: string, needle: string): number {
@@ -156,23 +192,19 @@ function count(haystack: string, needle: string): number {
 }
 
 for (const mode of BASH_MODES) {
-  test.skipIf(bashPath === null)(
+  test.skipIf(bashPath === null || (mode.name === 'ps0' && !bashPs0))(
     `bash [${mode.name}]: integration survives a noisy failing rc and records blocks`,
     async () => {
-      await driveRc(bashPath!, '.bashrc', mode.env);
+      await driveRc(bashPath!, '.bashrc', mode.prelude + 'echo hello-rc\nfalse\n', mode.env);
     },
     40000,
   );
 
-  test.skipIf(bashPath === null)(
+  test.skipIf(bashPath === null || (mode.name === 'ps0' && !bashPs0))(
     `bash [${mode.name}]: the user DEBUG trap keeps working`,
     async () => {
-      const { session, store, injection } = launch(
-        bashPath!,
-        '.bashrc',
-        "trap 'echo userdebug-trap' DEBUG\n",
-        mode.env,
-      );
+      const launched = launch(bashPath!, '.bashrc', "trap 'echo userdebug-trap' DEBUG\n", mode.env);
+      const { session, store } = launched;
       try {
         await waitFor(() => store.integrated && store.promptRow !== null, 20000);
         if (mode.name === 'ps0') {
@@ -184,38 +216,46 @@ for (const mode of BASH_MODES) {
           await waitFor(() => store.blocks.length >= 1, 20000);
           expect(count(screenText(session), 'userdebug-trap')).toBeGreaterThan(before);
         }
+      } catch (err) {
+        dump(launched, `bash [${mode.name}] DEBUG trap`);
+        throw err;
       } finally {
-        stop({ session, store, injection });
+        stop(launched);
       }
     },
     40000,
   );
 
-  test.skipIf(bashPath === null)(
+  test.skipIf(bashPath === null || (mode.name === 'ps0' && !bashPs0))(
     `bash [${mode.name}]: the user PROMPT_COMMAND sees the real exit status`,
     async () => {
-      const { session, store, injection } = launch(
+      const launched = launch(
         bashPath!,
         '.bashrc',
         "PROMPT_COMMAND='echo user-pc-status=$?'\n",
         mode.env,
       );
+      const { session, store } = launched;
       try {
         await waitFor(() => store.integrated && store.promptRow !== null, 20000);
         session.write('false\r');
         await waitFor(() => store.blocks.length >= 1, 20000);
         await waitFor(() => screenText(session).includes('user-pc-status=1'), 20000);
+      } catch (err) {
+        dump(launched, `bash [${mode.name}] PROMPT_COMMAND status`);
+        throw err;
       } finally {
-        stop({ session, store, injection });
+        stop(launched);
       }
     },
     40000,
   );
 
-  test.skipIf(bashPath === null)(
+  test.skipIf(bashPath === null || (mode.name === 'ps0' && !bashPs0))(
     `bash [${mode.name}]: an empty Enter does not create a block`,
     async () => {
-      const { session, store, injection } = launch(bashPath!, '.bashrc', '', mode.env);
+      const launched = launch(bashPath!, '.bashrc', '', mode.env);
+      const { session, store } = launched;
       try {
         await waitFor(() => store.integrated && store.promptRow !== null, 20000);
 
@@ -230,8 +270,11 @@ for (const mode of BASH_MODES) {
         expect(store.blocks.length).toBe(1);
         expect(store.blocks[0]!.command).toContain('true');
         expect(store.blocks[0]!.exitCode).toBe(0);
+      } catch (err) {
+        dump(launched, `bash [${mode.name}] empty Enter`);
+        throw err;
       } finally {
-        stop({ session, store, injection });
+        stop(launched);
       }
     },
     40000,
@@ -239,11 +282,12 @@ for (const mode of BASH_MODES) {
 }
 
 test.skipIf(zshPath === null)('zsh: integration survives a noisy failing rc and records blocks', async () => {
-  await driveRc(zshPath!, '.zshrc');
+  await driveRc(zshPath!, '.zshrc', 'echo hello-rc\nfalse\n');
 }, 40000);
 
 test.skipIf(pwshPath === null)('pwsh: integration records blocks, exit codes and ends the session', async () => {
-  const { session, store, injection } = launch(pwshPath!, '', '');
+  const launched = launch(pwshPath!, '', '');
+  const { session, store } = launched;
   let exited: number | undefined;
   session.onExit(code => {
     exited = code;
@@ -266,7 +310,10 @@ test.skipIf(pwshPath === null)('pwsh: integration records blocks, exit codes and
     session.write('exit 3\r');
     await waitFor(() => exited !== undefined, 40000);
     expect(exited).toBe(3);
+  } catch (err) {
+    dump(launched, 'pwsh');
+    throw err;
   } finally {
-    stop({ session, store, injection });
+    stop(launched);
   }
 }, 60000);
