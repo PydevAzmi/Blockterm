@@ -25,6 +25,14 @@ export interface Chrome {
 
 export const FOOTER = 'F1 help · ctrl+k agent · ctrl+l clear';
 
+export function cellFrom(cell: IBufferCell): Cell {
+  const width = cell.getWidth();
+  const chars = cell.getChars();
+  if (width === 0) return { ch: '', width: 0, sgr: buildSgr(cell) };
+  if (width === 2) return { ch: chars, width: 2, sgr: buildSgr(cell) };
+  return { ch: chars === '' ? ' ' : chars, width: 1, sgr: buildSgr(cell) };
+}
+
 function buildSgr(cell: IBufferCell): string {
   const parts: string[] = [];
 
@@ -120,15 +128,8 @@ export function composeFrame(
       if (c > cols - 3) break;
       const cell = line.getCell(x, reCell);
       if (!cell) continue;
-      const width = cell.getWidth();
-      if (width === 0) {
-        put(r, c, '', 0, buildSgr(cell));
-      } else if (width === 2) {
-        put(r, c, cell.getChars(), 2, buildSgr(cell));
-      } else {
-        const ch = cell.getChars();
-        put(r, c, ch === '' ? ' ' : ch, 1, buildSgr(cell));
-      }
+      const copied = cellFrom(cell);
+      put(r, c, copied.ch, copied.width, copied.sgr);
     }
   }
 

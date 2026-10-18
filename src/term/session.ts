@@ -51,7 +51,7 @@ export class TerminalSession {
   ) {
     this.mirror = new Terminal({
       allowProposedApi: true,
-      scrollback: 1000,
+      scrollback: 10000,
       cols: size.cols,
       rows: size.rows,
     });
