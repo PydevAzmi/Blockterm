@@ -67,3 +67,22 @@ top and pwsh are not installed on this machine.
 - [ ] **Mouse in vim** (`:set mouse=a`) with a real mouse.
 - [ ] **`shift+PgUp` delivery** on Windows Terminal / iTerm2 / kitty / tmux (spec §5.3).
 - [ ] **Real feel: lag, tearing, cursor flicker** compared with the bare terminal.
+
+## Agent (slices 3–5)
+
+Owner checks for the agent panel, the approval card and the write tools. Run these with a real
+model, not the headless fake provider.
+
+- [ ] **Real Anthropic key.** `blockterm setup` selects `@ai-sdk/anthropic`, `ANTHROPIC_API_KEY` is
+  set, `blockterm doctor` passes, and `ctrl+k` opens the panel with no setup hint.
+- [ ] **ssh to a host, ask about a failed service, approve one command.** ssh into a host, stop or
+  break a service, ask why it failed, and approve exactly one suggested command. Its output lands in
+  the terminal and the card clears.
+- [ ] **vim, ask for an edit, approve.** Open a file in vim, ask the agent for a specific edit, and
+  approve the keystrokes it wants to send. The edit lands in the buffer.
+- [ ] **Deny with a reason.** With a card pending, press `n`, type a reason, press `Enter`. Nothing is
+  typed into the shell and the agent sees the reason.
+- [ ] **Type a sudo password while a card is pending.** With a card showing, return to the terminal
+  with `ctrl+k` and type a password by hand. The keystrokes reach the shell, never the agent, and
+  never show in the panel.
+

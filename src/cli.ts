@@ -139,7 +139,7 @@ export function createIo(
 async function runSetupCommand(): Promise<void> {
   const io = createIo(process.stdin, process.stdout);
   try {
-    const path = configPath(process.platform, process.env, homedir());
+    const path = process.env.BLOCKTERM_CONFIG || configPath(process.platform, process.env, homedir());
     const loaded = loadConfig(path);
     await runSetup(io, path, loaded.ok ? loaded.config : null);
   } finally {
@@ -148,7 +148,7 @@ async function runSetupCommand(): Promise<void> {
 }
 
 async function runDoctorCommand(): Promise<number> {
-  const path = configPath(process.platform, process.env, homedir());
+  const path = process.env.BLOCKTERM_CONFIG || configPath(process.platform, process.env, homedir());
   const loaded = loadConfig(path);
   const shell = resolveShell({
     platform: process.platform,
@@ -202,7 +202,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const path = configPath(process.platform, process.env, homedir());
+  const path = process.env.BLOCKTERM_CONFIG || configPath(process.platform, process.env, homedir());
   const loaded = loadConfig(path);
   const configShell = loaded.ok ? loaded.config.shell : null;
   const shell = resolveShell({
@@ -218,7 +218,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    const code = await runApp({ shell, stdin, stdout });
+    const code = await runApp({ shell, stdin, stdout, loadConfig: () => loaded });
     process.exit(code);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
