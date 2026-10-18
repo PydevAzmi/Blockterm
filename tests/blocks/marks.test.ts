@@ -103,6 +103,104 @@ test('stray D before any C is dropped', async () => {
   expect(marks.map(m => m.kind)).toEqual(['prompt', 'command']);
 });
 
+test('commandText keeps line breaks on explicit newlines', async () => {
+  const mirror = makeMirror();
+  const marks = collect(mirror);
+  await write(mirror, '\x1b]133;B\x07echo a \r\n> b\x1b]133;C\x07');
+
+  const output = marks.find(m => m.kind === 'output');
+  expect(output).toEqual({ kind: 'output', row: 1, commandText: 'echo a \n> b' });
+});
+
+test('commandText joins soft-wrapped rows without a newline', async () => {
+  const mirror = makeMirror(10, 10);
+  const marks = collect(mirror);
+  await write(mirror, '\x1b]133;B\x07echo aaaa bbbb\x1b]133;C\x07');
+
+  const output = marks.find(m => m.kind === 'output');
+  expect(output?.commandText).toBe('echo aaaa bbbb');
+  expect(output?.commandText).not.toContain('\n');
+});
+
+test('commandText keeps CJK characters whole', async () => {
+  const mirror = makeMirror();
+  const marks = collect(mirror);
+  await write(mirror, '\x1b]133;B\x07echo 世界\r\n\x1b]133;C\x07');
+
+  const output = marks.find(m => m.kind === 'output');
+  expect(output?.commandText).toBe('echo 世界');
+});
+
+test('command rows survive scrollback', async () => {
+  const mirror = makeMirror(20, 5);
+  const marks = collect(mirror);
+  const filler = 'x\r\n'.repeat(12);
+  await write(mirror, `\x1b]133;A\x07\x1b]133;B\x07top\r\n${filler}\x1b]133;C\x07`);
+
+  const command = marks.find(m => m.kind === 'command');
+  const output = marks.find(m => m.kind === 'output');
+  expect(command?.row).toBe(0);
+  expect(output?.row).toBe(13);
+  expect(output?.commandText.startsWith('top\n')).toBe(true);
+});
+
+test('markers are disposed and handlers stop after dispose', async () => {
+  const mirror = makeMirror();
+  const marks: Mark[] = [];
+  const watcher = watchMarks(mirror, m => marks.push(m));
+
+  await write(
+    mirror,
+    '\x1b]133;A\x07$ \x1b]133;B\x07ls -la\r\n\x1b]133;C\x07out\r\n\x1b]133;D;0\x07',
+  );
+  expect(mirror.markers.length).toBe(0);
+
+  watcher.dispose();
+  await write(
+    mirror,
+    '\x1b]133;A\x07\x1b]133;B\x07x\x1b]133;C\x07\x1b]133;D\x07',
+  );
+  expect(marks.map(m => m.kind)).toEqual(['prompt', 'command', 'output', 'done']);
+});
+
+test('133 sub-commands with parameters behave like bare ones', async () => {
+  const mirror = makeMirror();
+  const marks = collect(mirror);
+  await write(
+    mirror,
+    '\x1b]133;A;cl=m\x07$ \x1b]133;B;x\x07ls\r\n\x1b]133;C;y\x07out\r\n\x1b]133;D;0\x07',
+  );
+
+  expect(marks.map(m => m.kind)).toEqual(['prompt', 'command', 'output', 'done']);
+  expect(marks[2]).toMatchObject({ kind: 'output', commandText: 'ls' });
+  expect(marks[3]).toMatchObject({ kind: 'done', exitCode: 0 });
+});
+
+test('a second C while running is ignored', async () => {
+  const mirror = makeMirror();
+  const marks = collect(mirror);
+  await write(
+    mirror,
+    '\x1b]133;B\x07ls\r\n\x1b]133;C\x07\x1b]133;C\x07\x1b]133;D;0\x07',
+  );
+  expect(marks.filter(m => m.kind === 'output')).toHaveLength(1);
+});
+
+test('OSC 7 with an empty path is ignored and falls through', async () => {
+  const mirror = makeMirror();
+  const seen: string[] = [];
+  mirror.parser.registerOscHandler(7, data => {
+    seen.push(data);
+    return true;
+  });
+  const marks = collect(mirror);
+
+  await write(mirror, '\x1b]7;file://host\x07');
+  await write(mirror, '\x1b]7;file:///\x07');
+  expect(marks).toEqual([]);
+  expect(seen).toEqual(['file://host', 'file:///']);
+});
+
 test('fall-through: unknown 133 sub-commands reach later handlers', async () => {
   const mirror = makeMirror();
 

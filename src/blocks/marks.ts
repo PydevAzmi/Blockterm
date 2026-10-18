@@ -1,4 +1,4 @@
-import type { IDisposable, IMarker, Terminal } from '@xterm/headless';
+import type { IBufferLine, IDisposable, IMarker, Terminal } from '@xterm/headless';
 
 export type Mark =
   | { kind: 'prompt'; row: number }
@@ -10,10 +10,41 @@ export type Mark =
 const OSC_133 = 133;
 const OSC_7 = 7;
 
-function absoluteRow(mirror: Terminal, marker: IMarker | null): number {
-  if (marker && marker.line >= 0) return marker.line;
+function currentRow(mirror: Terminal): number {
   const buffer = mirror.buffer.active;
   return buffer.baseY + buffer.cursorY;
+}
+
+function markerRow(mirror: Terminal, marker: IMarker | null): number {
+  return marker && marker.line >= 0 ? marker.line : currentRow(mirror);
+}
+
+function snapshotRow(mirror: Terminal): number {
+  const marker = mirror.registerMarker(0);
+  if (!marker) return currentRow(mirror);
+  const row = marker.line;
+  marker.dispose();
+  return row;
+}
+
+function lastContentColumn(line: IBufferLine, from: number, limit: number): number {
+  let end = Math.min(limit, line.length);
+  while (end > from) {
+    const cell = line.getCell(end - 1);
+    if (cell && cell.getCode() !== 0) break;
+    end--;
+  }
+  return end;
+}
+
+function rowText(line: IBufferLine, from: number): string {
+  let text = '';
+  const end = lastContentColumn(line, from, line.length);
+  for (let x = from; x < end; x++) {
+    const cell = line.getCell(x);
+    if (cell) text += cell.getChars();
+  }
+  return text;
 }
 
 function readText(
@@ -28,9 +59,9 @@ function readText(
   for (let row = startRow; row <= endRow; row++) {
     const line = buffer.getLine(row);
     if (!line) continue;
+    if (row > startRow && !line.isWrapped) text += '\n';
     const from = row === startRow ? startCol : 0;
-    const to = row === endRow ? endCol : undefined;
-    text += line.translateToString(true, from, to);
+    text += row === endRow ? line.translateToString(true, from, endCol) : rowText(line, from);
   }
   return text;
 }
@@ -40,6 +71,7 @@ function decodeCwd(data: string): string | null {
   const rest = data.slice('file://'.length);
   const slash = rest.indexOf('/');
   const path = slash === -1 ? '' : rest.slice(slash);
+  if (path === '' || path === '/') return null;
   let decoded: string;
   try {
     decoded = decodeURIComponent(path);
@@ -56,51 +88,60 @@ export function watchMarks(mirror: Terminal, onMark: (m: Mark) => void): IDispos
   let commandMarker: IMarker | null = null;
   let commandCol = 0;
 
+  const releaseCommand = (): void => {
+    commandMarker?.dispose();
+    commandMarker = null;
+  };
+
   const onOsc133 = (data: string): boolean => {
-    if (data === 'A') {
+    const semi = data.indexOf(';');
+    const sub = semi === -1 ? data : data.slice(0, semi);
+    const param = semi === -1 ? '' : data.slice(semi + 1);
+
+    if (sub === 'A') {
       if (promptPending) return true;
       promptPending = true;
       commandPending = false;
-      onMark({ kind: 'prompt', row: absoluteRow(mirror, mirror.registerMarker(0) ?? null) });
+      onMark({ kind: 'prompt', row: snapshotRow(mirror) });
       return true;
     }
 
-    if (data === 'B') {
+    if (sub === 'B') {
       if (commandPending) return true;
-      const buffer = mirror.buffer.active;
-      commandCol = buffer.cursorX;
+      releaseCommand();
+      commandCol = mirror.buffer.active.cursorX;
       commandMarker = mirror.registerMarker(0) ?? null;
       commandPending = true;
       promptPending = false;
-      onMark({ kind: 'command', row: absoluteRow(mirror, commandMarker), col: commandCol });
+      onMark({ kind: 'command', row: markerRow(mirror, commandMarker), col: commandCol });
       return true;
     }
 
-    if (data === 'C') {
-      const buffer = mirror.buffer.active;
-      const startRow = absoluteRow(mirror, commandMarker);
+    if (sub === 'C') {
+      if (running) return true;
       const commandText = readText(
         mirror,
-        startRow,
+        markerRow(mirror, commandMarker),
         commandMarker ? commandCol : 0,
-        buffer.baseY + buffer.cursorY,
-        buffer.cursorX,
+        currentRow(mirror),
+        mirror.buffer.active.cursorX,
       ).trim();
+      releaseCommand();
       running = true;
       commandPending = false;
       promptPending = false;
-      onMark({ kind: 'output', row: buffer.baseY + buffer.cursorY, commandText });
+      onMark({ kind: 'output', row: currentRow(mirror), commandText });
       return true;
     }
 
-    if (data === 'D' || data.startsWith('D;')) {
+    if (sub === 'D') {
       if (!running) return true;
-      const parsed = data === 'D' ? 0 : Number.parseInt(data.slice(2), 10);
+      const parsed = param === '' ? 0 : Number.parseInt(param, 10);
       running = false;
       commandPending = false;
       promptPending = false;
-      const row = absoluteRow(mirror, mirror.registerMarker(0) ?? null);
-      commandMarker = null;
+      const row = snapshotRow(mirror);
+      releaseCommand();
       onMark({ kind: 'done', row, exitCode: Number.isNaN(parsed) ? 0 : parsed });
       return true;
     }
@@ -123,6 +164,7 @@ export function watchMarks(mirror: Terminal, onMark: (m: Mark) => void): IDispos
   return {
     dispose: () => {
       for (const handler of handlers) handler.dispose();
+      releaseCommand();
     },
   };
 }
