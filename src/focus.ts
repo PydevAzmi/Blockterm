@@ -6,7 +6,13 @@ export interface PanelUi {
   focus: 'terminal' | 'panel';
   input: string;
   mode: 'idle' | 'busy';
-  card: null | { keys: string; target: string; editing: boolean; denying: boolean };
+  card: null | {
+    keys: string;
+    target: string;
+    editing: boolean;
+    denying: boolean;
+    truncated?: boolean;
+  };
 }
 
 export type Action =
@@ -92,9 +98,9 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
       } else if (isPrintable(ch)) {
         next = { ...next, input: next.input + ch };
       }
-    } else if (ch === 'y') {
+    } else if (ch === 'y' && card.truncated !== true) {
       return decide(next, { kind: 'approve', keys: card.keys, allowRest: false });
-    } else if (ch === 'a') {
+    } else if (ch === 'a' && card.truncated !== true) {
       return decide(next, { kind: 'approve', keys: card.keys, allowRest: true });
     } else if (ch === 'n') {
       next = { ...next, input: '', card: { ...card, denying: true } };

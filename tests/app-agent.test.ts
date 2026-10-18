@@ -6,7 +6,7 @@ import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test';
 import type { Config, LoadResult } from '../src/config.js';
 import { keyHint } from '../src/agent/model.js';
 import type { ModelResult } from '../src/agent/model.js';
-import { runApp } from '../src/app.js';
+import { runApp, cardTokens } from '../src/app.js';
 import { TerminalSession } from '../src/term/session.js';
 import { FakePty } from './helpers/fake-pty.js';
 
@@ -49,6 +49,16 @@ function sendKeysThenDone(): MockLanguageModelV4 {
       return n === 1
         ? callStream('c1', 'send_keys', { keys: 'echo hi<Enter>' })
         : textStream('done');
+    },
+  });
+}
+
+function sendKeysModel(keys: string): MockLanguageModelV4 {
+  let n = 0;
+  return new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      return n === 1 ? callStream('c1', 'send_keys', { keys }) : textStream('done');
     },
   });
 }
@@ -314,6 +324,40 @@ test('a throwing model factory shows a redacted error and resets to idle', async
   await until(() => output(stdout).includes('error:'));
   expect(output(stdout)).toContain('boom');
   expect(output(stdout)).not.toContain('sk-secretvalue123');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('invalid card keys show an invalid-keys message', () => {
+  const tokens = cardTokens('echo <Foo>');
+  expect(tokens).toHaveLength(1);
+  expect(tokens[0]).toEqual({ kind: 'text', label: 'invalid keys: unknown key <Foo>' });
+});
+
+test('a card too long to show rejects y but approves an edit with enter', async () => {
+  const keys = `echo ${'x'.repeat(80)}<Enter>`;
+  const { run, pty, stdin, stdout } = startApp({
+    load: () => LOADED,
+    model: okModel(sendKeysModel(keys)),
+    cols: 200,
+    rows: 8,
+  });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('too long to show'));
+
+  stdin.emit('data', 'y');
+  await wait(20);
+  expect(pty.written).toHaveLength(0);
+
+  stdin.emit('data', 'e');
+  await wait(5);
+  stdin.emit('data', '\r');
+  await until(() => pty.written.length > 0);
+  expect(pty.written.map(String).join('')).toContain('echo xxxx');
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);

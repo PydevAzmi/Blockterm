@@ -84,16 +84,17 @@ test('a long card payload wraps across rows without dropping characters', () => 
   expect(all).toContain('⏎ Enter');
 });
 
-test('an oversized card shows a more marker instead of cutting silently', () => {
+test('an oversized card is reported truncated and shows the edit/deny hint', () => {
   const cs = blank();
-  const rect = { row: 1, col: 2, rows: 4, cols: 36 };
-  const parsed = parseKeys('echo hi<Enter>');
+  const rect = { row: 1, col: 2, rows: 5, cols: 36 };
+  const parsed = parseKeys('git commit -am "a very long commit message that will not fit"<Enter>');
   const tokens = parsed.ok ? displayTokens(parsed.tokens) : [];
-  drawPanel(cs, FRAME_COLS, rect, ui({ model: 'm' }), [], { target: 'shell', tokens });
+  const result = drawPanel(cs, FRAME_COLS, rect, ui({ model: 'm' }), [], { target: 'shell', tokens });
+  expect(result.cardTruncated).toBe(true);
   const all = Array.from({ length: rect.rows }, (_, i) =>
-    rowText(cs, rect.row + i).slice(rect.col, rect.col + rect.cols),
+    rowText(cs, rect.row + i).slice(rect.col, rect.col + rect.cols - 1),
   ).join('');
-  expect(all).toContain('more)');
+  expect(all).toContain('too long to show — e to edit, n to deny, or widen the window');
 });
 
 test('the docked seam has a single border and keeps the outer border', () => {
@@ -150,13 +151,13 @@ test('input and card target control characters are escaped', () => {
 
 test('returns the cursor after the input prompt when focused', () => {
   const cs = blank();
-  const pos = drawPanel(cs, FRAME_COLS, RECT, ui({ input: 'hi' }), [], null);
-  expect(pos).toEqual({ row: INPUT_ROW, col: INNER_COL + 4 });
+  const result = drawPanel(cs, FRAME_COLS, RECT, ui({ input: 'hi' }), [], null);
+  expect(result.cursor).toEqual({ row: INPUT_ROW, col: INNER_COL + 4 });
   expect(rowText(cs, INPUT_ROW).slice(INNER_COL)).toContain('❯ hi');
 });
 
 test('returns no cursor when the terminal has focus', () => {
   const cs = blank();
-  const pos = drawPanel(cs, FRAME_COLS, RECT, ui({ focus: 'terminal' }), [], null);
-  expect(pos).toBeNull();
+  const result = drawPanel(cs, FRAME_COLS, RECT, ui({ focus: 'terminal' }), [], null);
+  expect(result.cursor).toBeNull();
 });

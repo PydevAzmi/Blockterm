@@ -18,6 +18,11 @@ const withCard = (over: Partial<PanelUi> = {}): PanelUi => ({
   card: { keys: 'rm -rf\r', target: 'shell', editing: false, denying: false },
 });
 
+const truncatedCard = (): PanelUi => ({
+  ...panel(),
+  card: { keys: 'rm -rf\r', target: 'shell', editing: false, denying: false, truncated: true },
+});
+
 test('agent-key opens the panel and reports a layout change', () => {
   const r = reduce(initialUi(), { type: 'agent-key' });
   expect(r.ui.open).toBe(true);
@@ -111,6 +116,30 @@ test('typing on a plain card does not edit the input line', () => {
   const r = reduce(withCard(), bytes('jkl'));
   expect(r.ui.input).toBe('');
   expect(r.actions).toEqual([]);
+});
+
+test('a truncated card ignores y', () => {
+  const r = reduce(truncatedCard(), bytes('y'));
+  expect(r.actions).toEqual([]);
+  expect(r.ui.card).not.toBeNull();
+});
+
+test('a truncated card ignores a', () => {
+  const r = reduce(truncatedCard(), bytes('a'));
+  expect(r.actions).toEqual([]);
+  expect(r.ui.card).not.toBeNull();
+});
+
+test('a truncated card still denies with n', () => {
+  const r = reduce(truncatedCard(), bytes('n'));
+  expect(r.ui.card?.denying).toBe(true);
+  expect(r.actions).toEqual([]);
+});
+
+test('a truncated card still edits with e', () => {
+  const r = reduce(truncatedCard(), bytes('e'));
+  expect(r.ui.card?.editing).toBe(true);
+  expect(r.ui.input).toBe('rm -rf\r');
 });
 
 test('n starts a denial reason and enter denies with it', () => {

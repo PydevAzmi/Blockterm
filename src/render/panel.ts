@@ -21,6 +21,12 @@ const AMBER = '38;5;178';
 const AMBER_REVERSE = `${AMBER};7`;
 const PROMPT = '❯ ';
 const CARD_ACTIONS = 'y approve  e edit  n deny  a allow for this task';
+const CARD_NOTICE = 'too long to show — e to edit, n to deny, or widen the window';
+
+export interface PanelDrawResult {
+  cursor: { row: number; col: number } | null;
+  cardTruncated: boolean;
+}
 
 function charWidth(ch: string): 1 | 2 {
   const code = ch.codePointAt(0)!;
@@ -67,7 +73,7 @@ export function drawPanel(
   ui: PanelView,
   transcript: Transcript[],
   card: CardView | null,
-): { row: number; col: number } | null {
+): PanelDrawResult {
   const totalRows = Math.floor(cells.length / frameCols);
 
   const put = (row: number, col: number, ch: string, width: 0 | 1 | 2, sgr: string): void => {
@@ -170,14 +176,13 @@ export function drawPanel(
   }
 
   const cardBudget = Math.max(0, rect.rows - 2);
+  const cardTruncated = card !== null && cardRows.length > cardBudget;
   let cardShown = cardRows;
-  let more = 0;
-  if (cardRows.length > cardBudget) {
-    const keep = Math.max(0, cardBudget - 1);
-    more = cardRows.length - keep;
-    cardShown = cardRows.slice(0, keep);
+  if (cardTruncated) {
+    const notice = wrapLine(CARD_NOTICE, innerCols).flatMap(line => cellsFor(line, AMBER));
+    cardShown = [cardRows[0]!, ...notice].slice(0, cardBudget);
   }
-  const cardHeight = card !== null ? cardShown.length + (more > 0 ? 1 : 0) : 0;
+  const cardHeight = card !== null ? cardShown.length : 0;
 
   const transcriptTop = rect.row + 1;
   const available = Math.max(0, inputRow - cardHeight - transcriptTop);
@@ -199,12 +204,11 @@ export function drawPanel(
       drawCells(row, innerCol, rowCells);
       row += 1;
     }
-    if (more > 0) writeRun(row, innerCol, `…(${more} more)`, AMBER, innerCols);
   }
 
   const inputX = writeRun(inputRow, innerCol, PROMPT, '', innerCols);
   const endX = writeRun(inputRow, inputX, escapeControl(ui.input), '', innerCols - (inputX - innerCol));
 
-  if (ui.focus === 'panel') return { row: inputRow, col: endX };
-  return null;
+  const cursor = ui.focus === 'panel' ? { row: inputRow, col: endX } : null;
+  return { cursor, cardTruncated };
 }

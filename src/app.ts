@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 
 import type { LanguageModel, ModelMessage } from 'ai';
 
-import { displayTokens, parseKeys } from './agent/keys.js';
+import { displayTokens, escapeControl, parseKeys } from './agent/keys.js';
 import { runTask } from './agent/loop.js';
 import type { AgentEvent, Decision } from './agent/loop.js';
 import { createModel, keyHint, redact } from './agent/model.js';
@@ -32,6 +32,12 @@ import { spawnSession } from './term/session.js';
 import type { TerminalSession } from './term/session.js';
 
 const CONFIG_HINT = 'Run `blockterm setup` to choose a model';
+
+export function cardTokens(keys: string): { kind: 'text' | 'key'; label: string }[] {
+  const parsed = parseKeys(keys);
+  if (parsed.ok) return displayTokens(parsed.tokens);
+  return [{ kind: 'text', label: `invalid keys: ${escapeControl(parsed.message)}` }];
+}
 
 export async function runApp(o: {
   shell: ShellChoice;
@@ -111,7 +117,7 @@ export async function runApp(o: {
         trackedModes.cursorVisible,
       );
       if (layout.panel.mode !== 'hidden' && layout.panel.rect !== null) {
-        const cursor = drawPanel(
+        const panel = drawPanel(
           frame.cells,
           frame.cols,
           layout.panel.rect,
@@ -119,8 +125,11 @@ export async function runApp(o: {
           transcript,
           card,
         );
-        if (ui.focus === 'panel' && cursor !== null) {
-          frame.cursor = { row: cursor.row, col: cursor.col, visible: true };
+        if (ui.focus === 'panel' && panel.cursor !== null) {
+          frame.cursor = { row: panel.cursor.row, col: panel.cursor.col, visible: true };
+        }
+        if (ui.card !== null && (ui.card.truncated ?? false) !== panel.cardTruncated) {
+          ui = { ...ui, card: { ...ui.card, truncated: panel.cardTruncated } };
         }
       }
       if (layout.panel.mode === 'overlay' && ui.focus !== 'panel') {
@@ -269,8 +278,7 @@ export async function runApp(o: {
           approve: (keys) =>
             new Promise<Decision>((resolve) => {
               pendingDecision = resolve;
-              const parsed = parseKeys(keys);
-              const tokens = parsed.ok ? displayTokens(parsed.tokens) : [];
+              const tokens = cardTokens(keys);
               card = { target: session.program, tokens };
               ui = {
                 ...ui,
