@@ -79,7 +79,12 @@ test('zsh injection records an empty original when the user has no ZDOTDIR', () 
 });
 
 test('pwsh injection loads a script with -NoLogo -NoExit -Command', () => {
-  const inj = inject({ file: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: ['-NoLogo'] }, {}, tempDir());
+  const inj = inject(
+    { file: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: ['-NoLogo'] },
+    {},
+    tempDir(),
+    'linux',
+  );
   expect(inj.args.slice(0, 3)).toEqual(['-NoLogo', '-NoExit', '-Command']);
   const command = inj.args[3]!;
   expect(command.startsWith(". '")).toBe(true);
@@ -92,12 +97,26 @@ test('pwsh injection loads a script with -NoLogo -NoExit -Command', () => {
 test('pwsh path is quoted with doubled single quotes', () => {
   const root = mkdtempSync(join(tmpdir(), "blockterm-'quote-"));
   dirs.push(root);
-  const inj = inject({ file: 'pwsh', args: [] }, {}, root);
+  const inj = inject({ file: 'pwsh', args: [] }, {}, root, 'linux');
   const command = inj.args[3]!;
   expect(command).toContain("''");
   const unquoted = command.slice(3, -1).replace(/''/g, "'");
   expect(existsSync(unquoted)).toBe(true);
   inj.cleanup();
+});
+
+test('Ruling AG: darwin pwsh is left unchanged while linux and win32 pwsh are injected', () => {
+  const untouched = inject({ file: 'pwsh', args: ['-NoLogo'] }, {}, tempDir(), 'darwin');
+  expect(untouched.file).toBe('pwsh');
+  expect(untouched.args).toEqual(['-NoLogo']);
+  expect(untouched.env).toEqual({});
+  untouched.cleanup();
+
+  for (const platform of ['linux', 'win32'] as NodeJS.Platform[]) {
+    const inj = inject({ file: 'pwsh', args: ['-NoLogo'] }, {}, tempDir(), platform);
+    expect(inj.args.slice(0, 3)).toEqual(['-NoLogo', '-NoExit', '-Command']);
+    inj.cleanup();
+  }
 });
 
 test('BLOCKTERM_NO_INTEGRATION=1 returns the input unchanged', () => {

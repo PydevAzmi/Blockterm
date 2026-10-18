@@ -285,7 +285,9 @@ test.skipIf(zshPath === null)('zsh: integration survives a noisy failing rc and 
   await driveRc(zshPath!, '.zshrc', 'echo hello-rc\nfalse\n');
 }, 40000);
 
-test.skipIf(pwshPath === null)('pwsh: integration records blocks, exit codes and ends the session', async () => {
+// Ruling AG: on macOS the pwsh PSConsoleHostReadLine override echoes the typed command but
+// never runs it, so inject() leaves the darwin pwsh spawn untouched (see src/shellint/inject.ts).
+test.skipIf(pwshPath === null || process.platform === 'darwin')('pwsh: integration records blocks, exit codes and ends the session', async () => {
   const launched = launch(pwshPath!, '', '');
   const { session, store } = launched;
   let exited: number | undefined;

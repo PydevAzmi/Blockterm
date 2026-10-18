@@ -68,6 +68,7 @@ export function inject(
   shell: ShellChoice,
   env: Record<string, string | undefined>,
   tmpRoot?: string,
+  platform: NodeJS.Platform = process.platform,
 ): Injection {
   const kind = shellKind(shell.file);
   const noop = (): void => {};
@@ -75,7 +76,9 @@ export function inject(
     env.BLOCKTERM_NO_INTEGRATION === '1' ||
     kind === 'powershell' ||
     kind === 'other' ||
-    (kind === 'bash' && process.platform === 'win32' && !isGitBash(shell.file));
+    // Ruling AG: on macOS pwsh never runs the typed command, so leave its spawn untouched.
+    (kind === 'pwsh' && platform === 'darwin') ||
+    (kind === 'bash' && platform === 'win32' && !isGitBash(shell.file));
   if (off) {
     return { file: shell.file, args: shell.args, env: {}, cleanup: noop };
   }
@@ -89,7 +92,7 @@ export function inject(
   if (kind === 'bash') {
     const rc = join(dir, 'bashrc');
     writeFileSync(rc, BASH_RC_PREFIX + BASH_INTEGRATION, { mode: 0o600 });
-    const argPath = process.platform === 'win32' ? msysPath(rc) : rc;
+    const argPath = platform === 'win32' ? msysPath(rc) : rc;
     return { file: shell.file, args: ['--rcfile', argPath], env: {}, cleanup };
   }
 
