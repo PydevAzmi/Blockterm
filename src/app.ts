@@ -282,7 +282,13 @@ export async function runApp(o: {
               card = { target: session.program, tokens };
               ui = {
                 ...ui,
-                card: { keys, target: session.program, editing: false, denying: false },
+                card: {
+                  keys,
+                  target: session.program,
+                  editing: false,
+                  denying: false,
+                  truncated: true,
+                },
               };
               requestRender();
             }),

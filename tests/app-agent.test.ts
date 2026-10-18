@@ -227,6 +227,34 @@ test('approving the card types the keys into the pty', async () => {
   await expect(run).resolves.toBe(0);
 });
 
+test('a card cannot be approved before its first render', async () => {
+  vi.useFakeTimers();
+  try {
+    const model = sendKeysThenDone();
+    const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+    stdin.emit('data', '\x0b');
+    await vi.advanceTimersByTimeAsync(0);
+    stdin.emit('data', 'hello\r');
+    await vi.advanceTimersByTimeAsync(0);
+
+    stdin.emit('data', 'y');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(output(stdout)).not.toContain('❯ y');
+    expect(pty.written).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(20);
+    stdin.emit('data', 'y');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pty.written.map(String).join('')).toContain('echo hi\r');
+
+    pty.exit(0);
+    await expect(run).resolves.toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test('the transcript shows the agent reply', async () => {
   const model = sendKeysThenDone();
   const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
