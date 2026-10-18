@@ -77,7 +77,9 @@ export async function runApp(o: {
     let ui = initialUi();
     const transcript: Transcript[] = [];
     let card: CardView | null = null;
-    let cardShownAt: number | null = null;
+    let cardVisibleAt: number | null = null;
+    let cardDrawnAt: number | null = null;
+    let inputVisibleAt: number | null = null;
     let lastKeyAt = Number.NEGATIVE_INFINITY;
     let pendingDecision: ((decision: Decision) => void) | null = null;
     let taskController: AbortController | null = null;
@@ -133,7 +135,21 @@ export async function runApp(o: {
           transcript,
           card,
         );
-        if (card !== null && cardShownAt === null) cardShownAt = Date.now();
+        if (card !== null) {
+          const now = Date.now();
+          if (cardDrawnAt === null) cardDrawnAt = now;
+          if (panel.cardTruncated) cardVisibleAt = null;
+          else if (cardVisibleAt === null) cardVisibleAt = now;
+        } else {
+          cardVisibleAt = null;
+          cardDrawnAt = null;
+        }
+        const editingCard = ui.card !== null && (ui.card.editing || ui.card.denying);
+        if (editingCard && !panel.inputTruncated) {
+          if (inputVisibleAt === null) inputVisibleAt = Date.now();
+        } else {
+          inputVisibleAt = null;
+        }
         if (ui.focus === 'panel' && panel.cursor !== null) {
           frame.cursor = { row: panel.cursor.row, col: panel.cursor.col, visible: true };
         }
@@ -145,7 +161,9 @@ export async function runApp(o: {
         }
         if (ui.inputShown !== true) ui = { ...ui, inputShown: true };
       } else if (card !== null) {
-        cardShownAt = null;
+        cardVisibleAt = null;
+        cardDrawnAt = null;
+        inputVisibleAt = null;
         if (ui.card !== null && ui.card.truncated !== true) {
           ui = { ...ui, card: { ...ui.card, truncated: true } };
         }
@@ -185,7 +203,9 @@ export async function runApp(o: {
       const resolve = pendingDecision;
       pendingDecision = null;
       card = null;
-      cardShownAt = null;
+      cardVisibleAt = null;
+      cardDrawnAt = null;
+      inputVisibleAt = null;
       if (resolve !== null) resolve(decision);
       requestRender();
     };
@@ -298,7 +318,9 @@ export async function runApp(o: {
               pendingDecision = resolve;
               const tokens = cardTokens(keys);
               card = { target: session.program, tokens };
-              cardShownAt = null;
+              cardVisibleAt = null;
+              cardDrawnAt = null;
+              inputVisibleAt = null;
               ui = {
                 ...ui,
                 input: '',
@@ -320,7 +342,9 @@ export async function runApp(o: {
       } finally {
         if (taskController === controller) taskController = null;
         card = null;
-        cardShownAt = null;
+        cardVisibleAt = null;
+        cardDrawnAt = null;
+        inputVisibleAt = null;
         pendingDecision = null;
         if (!stopped) {
           ui = { ...ui, mode: 'idle', card: null };
@@ -348,7 +372,9 @@ export async function runApp(o: {
               text: redact(error instanceof Error ? error.message : String(error), key === '' ? [] : [key]),
             });
             card = null;
-            cardShownAt = null;
+            cardVisibleAt = null;
+            cardDrawnAt = null;
+            inputVisibleAt = null;
             pendingDecision = null;
             ui = { ...ui, mode: 'idle', card: null };
             requestRender();
@@ -371,14 +397,17 @@ export async function runApp(o: {
 
       if (c.editing) {
         if (!event.data.includes('\r')) return false;
-        if (ui.inputShown !== true) return true;
-        return quiet < APPROVAL_QUIET_MS;
+        if (inputVisibleAt === null) return true;
+        return now - inputVisibleAt < APPROVAL_QUIET_MS || quiet < APPROVAL_QUIET_MS;
       }
       if (c.denying) return false;
 
-      if (![...event.data].some(ch => APPROVE_KEYS.has(ch))) return false;
-      if (cardShownAt === null) return true;
-      return now - cardShownAt < APPROVAL_QUIET_MS || quiet < APPROVAL_QUIET_MS;
+      const keys = [...event.data];
+      if (!keys.some(ch => APPROVE_KEYS.has(ch))) return false;
+      const approve = keys.some(ch => ch === 'y' || ch === 'a');
+      const seenAt = approve ? cardVisibleAt : cardDrawnAt;
+      if (seenAt === null) return true;
+      return now - seenAt < APPROVAL_QUIET_MS || quiet < APPROVAL_QUIET_MS;
     };
 
     const handleEvent = (event: InputEvent): void => {
@@ -401,6 +430,13 @@ export async function runApp(o: {
         return;
       }
       lastKeyAt = now;
+      if (
+        ui.card !== null &&
+        (ui.card.editing || ui.card.denying) &&
+        (event.type === 'paste' || (event.type === 'bytes' && !event.data.startsWith('\x1b')))
+      ) {
+        inputVisibleAt = null;
+      }
       const result = reduce(ui, event);
       ui = result.ui;
       if (ui.open && config === null && !configNoticeShown) {

@@ -579,6 +579,91 @@ test('the same edit fits and is approved in a wider panel', async () => {
   await expect(run).resolves.toBe(0);
 });
 
+test('a truncated card that fits after a resize still needs a fresh quiet pause before y', async () => {
+  vi.useFakeTimers();
+  try {
+    const keys = `echo ${'x'.repeat(80)}<Enter>`;
+    const { run, pty, stdin, stdout } = startApp({
+      load: () => LOADED,
+      model: okModel(sendKeysModel(keys)),
+      cols: 200,
+      rows: 8,
+    });
+
+    stdin.emit('data', '\x0b');
+    await vi.advanceTimersByTimeAsync(0);
+    stdin.emit('data', 'hello\r');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(output(stdout)).toContain('too long to show');
+
+    await vi.advanceTimersByTimeAsync(450);
+
+    stdout.rows = 40;
+    stdout.emit('resize');
+    await vi.advanceTimersByTimeAsync(70);
+    expect(output(stdout)).not.toContain('too long to show');
+
+    stdin.emit('data', 'y');
+    await vi.advanceTimersByTimeAsync(80);
+    expect(pty.written).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(450);
+    stdin.emit('data', 'y');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(pty.written.map(String).join('')).toContain('echo xxxx');
+
+    pty.exit(0);
+    await expect(run).resolves.toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('an edit field that fits after a resize still needs a fresh quiet pause before enter', async () => {
+  vi.useFakeTimers();
+  try {
+    const keys = `echo ${'x'.repeat(140)}<Enter>`;
+    const { run, pty, stdin, stdout } = startApp({
+      load: () => LOADED,
+      model: okModel(sendKeysModel(keys)),
+      cols: 100,
+      rows: 8,
+    });
+
+    stdin.emit('data', '\x0b');
+    await vi.advanceTimersByTimeAsync(0);
+    stdin.emit('data', 'hello\r');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(output(stdout)).toContain('Type into');
+
+    await vi.advanceTimersByTimeAsync(450);
+    stdin.emit('data', 'e');
+    await vi.advanceTimersByTimeAsync(50);
+
+    await vi.advanceTimersByTimeAsync(450);
+
+    stdout.rows = 40;
+    stdout.emit('resize');
+    await vi.advanceTimersByTimeAsync(70);
+
+    stdin.emit('data', '\r');
+    await vi.advanceTimersByTimeAsync(80);
+    expect(pty.written).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(450);
+    stdin.emit('data', '\r');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(pty.written.map(String).join('')).toContain('echo xxxx');
+
+    pty.exit(0);
+    await expect(run).resolves.toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test('missing config shows the setup hint and footer status', async () => {
   const { run, pty, stdin, stdout } = startApp({
     load: () => ({ ok: false, reason: 'missing', message: 'no config' }),
