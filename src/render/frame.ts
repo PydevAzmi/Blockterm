@@ -20,6 +20,7 @@ export interface Chrome {
   title: string;
   footer: string;
   view: View;
+  footerStatus?: string;
 }
 
 export const FOOTER = 'F1 help · ctrl+k agent · ctrl+l clear';
@@ -91,17 +92,23 @@ export function composeFrame(
 
   putText(0, framed('┌ ', `${chrome.title} `, '┐'));
   putText(rows - 2, framed('├', '', '┤'));
-  putText(rows - 1, framed('└ ', `${chrome.footer} `, '┘'));
+  const footer =
+    chrome.footerStatus !== undefined && chrome.footerStatus !== ''
+      ? `${chrome.footer}  ${chrome.footerStatus}`
+      : chrome.footer;
+  putText(rows - 1, framed('└ ', `${footer} `, '┘'));
 
   const active = mirror.buffer.active;
   const reCell = active.getNullCell();
   const side = chrome.view === 'blocks' ? '│' : ' ';
+  const rightSide = layout.origin.col + layout.pty.cols;
+  const rightBorder = rightSide + 1;
 
   for (let r = 1; r <= rows - 3; r += 1) {
     put(r, 0, '│', 1, '');
-    put(r, cols - 1, '│', 1, '');
+    if (rightBorder < cols) put(r, rightBorder, '│', 1, '');
     put(r, 1, side, 1, '');
-    if (cols - 2 > 1) put(r, cols - 2, side, 1, '');
+    if (rightSide > 1 && rightSide < cols) put(r, rightSide, side, 1, '');
 
     const i = r - 1;
     if (i >= layout.pty.rows) continue;
