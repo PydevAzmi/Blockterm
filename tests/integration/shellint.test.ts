@@ -83,13 +83,19 @@ interface Launched {
   injection: ReturnType<typeof inject>;
 }
 
-function launch(shellFile: string, rcName: string, rcContent: string): Launched {
+function launch(
+  shellFile: string,
+  rcName: string,
+  rcContent: string,
+  extraEnv: Record<string, string> = {},
+): Launched {
   const home = tempDir('blockterm-int-home-');
   const work = tempDir('blockterm-int-work-');
   if (rcName !== '') writeFileSync(join(home, rcName), rcContent);
 
   const env: Record<string, string | undefined> = {
     ...process.env,
+    ...extraEnv,
     HOME: home,
     USERPROFILE: home,
     TERM: 'xterm-256color',
@@ -111,8 +117,8 @@ function stop(launched: Launched): void {
   launched.injection.cleanup();
 }
 
-async function driveRc(shellFile: string, rcName: string): Promise<void> {
-  const { session, store, injection } = launch(shellFile, rcName, 'echo hello-rc\nfalse\n');
+async function driveRc(shellFile: string, rcName: string, extraEnv: Record<string, string> = {}): Promise<void> {
+  const { session, store, injection } = launch(shellFile, rcName, 'echo hello-rc\nfalse\n', extraEnv);
   try {
     await waitFor(() => store.integrated && store.promptRow !== null, 20000);
 
@@ -134,56 +140,106 @@ async function driveRc(shellFile: string, rcName: string): Promise<void> {
   }
 }
 
-test.skipIf(bashPath === null)('bash: integration survives a noisy failing rc and records blocks', async () => {
-  await driveRc(bashPath!, '.bashrc');
-}, 40000);
+const BASH_MODES: { name: string; env: Record<string, string> }[] = [
+  { name: 'ps0', env: {} },
+  { name: 'debug', env: { BLOCKTERM_FORCE_BASH_DEBUG: '1' } },
+];
+
+function count(haystack: string, needle: string): number {
+  let n = 0;
+  let i = haystack.indexOf(needle);
+  while (i !== -1) {
+    n += 1;
+    i = haystack.indexOf(needle, i + needle.length);
+  }
+  return n;
+}
+
+for (const mode of BASH_MODES) {
+  test.skipIf(bashPath === null)(
+    `bash [${mode.name}]: integration survives a noisy failing rc and records blocks`,
+    async () => {
+      await driveRc(bashPath!, '.bashrc', mode.env);
+    },
+    40000,
+  );
+
+  test.skipIf(bashPath === null)(
+    `bash [${mode.name}]: the user DEBUG trap keeps working`,
+    async () => {
+      const { session, store, injection } = launch(
+        bashPath!,
+        '.bashrc',
+        "trap 'echo userdebug-trap' DEBUG\n",
+        mode.env,
+      );
+      try {
+        await waitFor(() => store.integrated && store.promptRow !== null, 20000);
+        if (mode.name === 'ps0') {
+          session.write('trap -p DEBUG\r');
+          await waitFor(() => screenText(session).includes("'echo userdebug-trap' DEBUG"), 20000);
+        } else {
+          const before = count(screenText(session), 'userdebug-trap');
+          session.write('echo bt-ping\r');
+          await waitFor(() => store.blocks.length >= 1, 20000);
+          expect(count(screenText(session), 'userdebug-trap')).toBeGreaterThan(before);
+        }
+      } finally {
+        stop({ session, store, injection });
+      }
+    },
+    40000,
+  );
+
+  test.skipIf(bashPath === null)(
+    `bash [${mode.name}]: the user PROMPT_COMMAND sees the real exit status`,
+    async () => {
+      const { session, store, injection } = launch(
+        bashPath!,
+        '.bashrc',
+        "PROMPT_COMMAND='echo user-pc-status=$?'\n",
+        mode.env,
+      );
+      try {
+        await waitFor(() => store.integrated && store.promptRow !== null, 20000);
+        session.write('false\r');
+        await waitFor(() => store.blocks.length >= 1, 20000);
+        await waitFor(() => screenText(session).includes('user-pc-status=1'), 20000);
+      } finally {
+        stop({ session, store, injection });
+      }
+    },
+    40000,
+  );
+
+  test.skipIf(bashPath === null)(
+    `bash [${mode.name}]: an empty Enter does not create a block`,
+    async () => {
+      const { session, store, injection } = launch(bashPath!, '.bashrc', '', mode.env);
+      try {
+        await waitFor(() => store.integrated && store.promptRow !== null, 20000);
+
+        session.write('\r');
+        await sleep(400);
+        session.write('\r');
+        await sleep(400);
+        expect(store.blocks.length).toBe(0);
+
+        session.write('true\r');
+        await waitFor(() => store.blocks.length >= 1, 20000);
+        expect(store.blocks.length).toBe(1);
+        expect(store.blocks[0]!.command).toContain('true');
+        expect(store.blocks[0]!.exitCode).toBe(0);
+      } finally {
+        stop({ session, store, injection });
+      }
+    },
+    40000,
+  );
+}
 
 test.skipIf(zshPath === null)('zsh: integration survives a noisy failing rc and records blocks', async () => {
   await driveRc(zshPath!, '.zshrc');
-}, 40000);
-
-test.skipIf(bashPath === null)('bash: the user DEBUG trap is left untouched', async () => {
-  const { session, store, injection } = launch(bashPath!, '.bashrc', "trap 'echo userdebug-trap' DEBUG\n");
-  try {
-    await waitFor(() => store.integrated && store.promptRow !== null, 20000);
-    session.write('trap -p DEBUG\r');
-    await waitFor(() => screenText(session).includes("'echo userdebug-trap' DEBUG"), 20000);
-  } finally {
-    stop({ session, store, injection });
-  }
-}, 40000);
-
-test.skipIf(bashPath === null)('bash: the user PROMPT_COMMAND sees the real exit status', async () => {
-  const { session, store, injection } = launch(bashPath!, '.bashrc', "PROMPT_COMMAND='echo user-pc-status=$?'\n");
-  try {
-    await waitFor(() => store.integrated && store.promptRow !== null, 20000);
-    session.write('false\r');
-    await waitFor(() => store.blocks.length >= 1, 20000);
-    await waitFor(() => screenText(session).includes('user-pc-status=1'), 20000);
-  } finally {
-    stop({ session, store, injection });
-  }
-}, 40000);
-
-test.skipIf(bashPath === null)('bash: an empty Enter does not create a block', async () => {
-  const { session, store, injection } = launch(bashPath!, '.bashrc', '');
-  try {
-    await waitFor(() => store.integrated && store.promptRow !== null, 20000);
-
-    session.write('\r');
-    await sleep(400);
-    session.write('\r');
-    await sleep(400);
-    expect(store.blocks.length).toBe(0);
-
-    session.write('true\r');
-    await waitFor(() => store.blocks.length >= 1, 20000);
-    expect(store.blocks.length).toBe(1);
-    expect(store.blocks[0]!.command).toContain('true');
-    expect(store.blocks[0]!.exitCode).toBe(0);
-  } finally {
-    stop({ session, store, injection });
-  }
 }, 40000);
 
 test.skipIf(pwshPath === null)('pwsh: integration records blocks, exit codes and ends the session', async () => {
@@ -202,9 +258,10 @@ test.skipIf(pwshPath === null)('pwsh: integration records blocks, exit codes and
     expect(ok.exitCode).toBe(0);
     expect(blockText(ok)).toContain('hi');
 
-    session.write('Get-Item nope\r');
+    const failCommand = process.platform === 'win32' ? 'cmd /c exit 2' : "sh -c 'exit 2'";
+    session.write(`${failCommand}\r`);
     await waitFor(() => store.blocks.length >= 2 && store.promptRow !== null, 40000);
-    expect(store.blocks[1]!.exitCode).not.toBe(0);
+    expect(store.blocks[1]!.exitCode).toBe(2);
 
     session.write('exit 3\r');
     await waitFor(() => exited !== undefined, 40000);

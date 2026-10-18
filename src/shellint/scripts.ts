@@ -4,6 +4,7 @@ if [ -z "\${BLOCKTERM_SHELL_INTEGRATION-}" ]; then
 
   __blockterm_prompt_done="0"
   __blockterm_last_hist=""
+  __blockterm_in_command="0"
   __blockterm_original_prompt_command="\${PROMPT_COMMAND-}"
 
   __blockterm_prompt_start() {
@@ -43,6 +44,7 @@ if [ -z "\${BLOCKTERM_SHELL_INTEGRATION-}" ]; then
     fi
     __blockterm_last_hist="$__blockterm_hist"
     __blockterm_prompt_done="1"
+    __blockterm_in_command="0"
 
     if [ -n "\${__blockterm_original_prompt_command-}" ]; then
       __blockterm_restore_status "$__blockterm_status"
@@ -57,7 +59,41 @@ if [ -z "\${BLOCKTERM_SHELL_INTEGRATION-}" ]; then
   }
 
   PROMPT_COMMAND=__blockterm_precmd
-  PS0="\\[\\e]133;C\\a\\]\${PS0-}"
+
+  # PS0 needs bash >= 4.4 (macOS ships 3.2). Otherwise chain a DEBUG trap instead.
+  __blockterm_use_debug="0"
+  if [ "\${BLOCKTERM_FORCE_BASH_DEBUG-}" = "1" ]; then
+    __blockterm_use_debug="1"
+  elif [ "\${BASH_VERSINFO[0]:-0}" -lt 4 ] || { [ "\${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "\${BASH_VERSINFO[1]:-0}" -lt 4 ]; }; then
+    __blockterm_use_debug="1"
+  fi
+
+  if [ "$__blockterm_use_debug" = "1" ]; then
+    __blockterm_preexec() {
+      case "$BASH_COMMAND" in
+        __blockterm_*) return 0 ;;
+      esac
+      if [ "$__blockterm_in_command" = "0" ]; then
+        __blockterm_in_command="1"
+        builtin printf '\\e]133;C\\a'
+      fi
+    }
+    __blockterm_get_trap() {
+      builtin local -a __blockterm_terms
+      builtin eval "__blockterm_terms=( $(trap -p DEBUG) )"
+      builtin printf '%s' "\${__blockterm_terms[2]:-}"
+    }
+    __blockterm_original_debug="$(__blockterm_get_trap)"
+    __blockterm_debug_handler() {
+      __blockterm_preexec
+      if [ -n "$__blockterm_original_debug" ]; then
+        builtin eval "$__blockterm_original_debug"
+      fi
+    }
+    trap '__blockterm_debug_handler' DEBUG
+  else
+    PS0="\\[\\e]133;C\\a\\]\${PS0-}"
+  fi
 
   __blockterm_update_prompt
 fi
@@ -172,6 +208,7 @@ if (-not $global:__blockterm_integrated) {
   $global:__blockterm_prompted = $false
   $global:__blockterm_has_psreadline = $false
   $global:__blockterm_last_history = 0
+  $global:__blockterm_previous_exit = 0
   $global:__blockterm_original_prompt = $function:prompt
 
   function global:prompt {
@@ -190,9 +227,21 @@ if (-not $global:__blockterm_integrated) {
 
     if ($global:__blockterm_command_ran) {
       $code = 0
-      if (-not $blocktermSuccess) {
-        if ($blocktermLastExit -ne 0) { $code = $blocktermLastExit } else { $code = 1 }
+      # Success only if $? is true AND LASTEXITCODE is fresh (unset/0/unchanged since last prompt).
+      # Native commands keep the previous LASTEXITCODE and (before PS 7.4 default) leave $? true.
+      $blocktermOk = $blocktermSuccess -and (
+        $null -eq $blocktermLastExit -or
+        $blocktermLastExit -eq 0 -or
+        $blocktermLastExit -eq $global:__blockterm_previous_exit
+      )
+      if (-not $blocktermOk) {
+        if ($null -ne $blocktermLastExit -and $blocktermLastExit -ne 0 -and $blocktermLastExit -ne $global:__blockterm_previous_exit) {
+          $code = $blocktermLastExit
+        } else {
+          $code = 1
+        }
       }
+      $global:__blockterm_previous_exit = $blocktermLastExit
       $result += "$([char]27)]133;D;$code$([char]7)"
       $global:__blockterm_command_ran = $false
     }
