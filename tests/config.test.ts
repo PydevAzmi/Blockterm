@@ -69,6 +69,19 @@ test('validateConfig: fills missing optional fields with null', () =>
     validateConfig({ provider: '@ai-sdk/anthropic', model: 'm', apiKeyEnv: 'ANTHROPIC_API_KEY' }),
   ).toEqual({ ok: true, config: { ...anthropic, model: 'm' } }));
 
+test('validateConfig: rejects an apiKeyEnv that is not an environment variable name', () => {
+  const r = validateConfig({ ...anthropic, apiKeyEnv: 'sk-ant-abc123' });
+  expect(r.ok).toBe(false);
+  if (!r.ok) expect(r.message).toBe('apiKeyEnv must be an environment variable name');
+  expect(JSON.stringify(r)).not.toContain('sk-ant-abc123');
+});
+
+test('validateConfig: accepts an empty apiKeyEnv', () =>
+  expect(validateConfig({ ...anthropic, apiKeyEnv: '' })).toEqual({
+    ok: true,
+    config: { ...anthropic, apiKeyEnv: '' },
+  }));
+
 test('validateConfig: rejects a non-object', () =>
   expect(validateConfig('nope').ok).toBe(false));
 

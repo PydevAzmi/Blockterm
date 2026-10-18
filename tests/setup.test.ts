@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -104,6 +104,41 @@ test('runSetup: re-asks an empty model', async () => {
 
   expect(config.model).toBe('claude-haiku-5-5');
   expect(questions.filter(question => question.startsWith('Model'))).toHaveLength(2);
+});
+
+test('runSetup: re-asks an apiKeyEnv that is not an env var name and never saves it', async () => {
+  const path = join(tempDir(), 'config.json');
+  const { io, lines } = scripted(['1', 'claude-haiku-5-5', 'sk-ant-abc123', '']);
+
+  const config = await runSetup(io, path, null);
+
+  expect(config.apiKeyEnv).toBe('ANTHROPIC_API_KEY');
+  expect(readFileSync(path, 'utf8')).not.toContain('sk-ant-abc123');
+  expect(lines).toContain('apiKeyEnv must be an environment variable name');
+});
+
+test('runSetup: a changed provider resets baseURL, name and key env defaults', async () => {
+  const path = join(tempDir(), 'config.json');
+  const existing: Config = {
+    provider: '@ai-sdk/openai-compatible',
+    model: 'local-model',
+    apiKeyEnv: '',
+    baseURL: 'http://localhost:1234/v1',
+    name: 'local',
+    shell: 'C:\\bin\\sh.exe',
+  };
+  const { io } = scripted(['1', 'claude-haiku-5-5', '']);
+
+  const config = await runSetup(io, path, existing);
+
+  expect(config).toEqual({
+    provider: '@ai-sdk/anthropic',
+    model: 'claude-haiku-5-5',
+    apiKeyEnv: 'ANTHROPIC_API_KEY',
+    baseURL: null,
+    name: null,
+    shell: 'C:\\bin\\sh.exe',
+  });
 });
 
 test('runSetup: an existing config supplies the defaults on a re-run', async () => {

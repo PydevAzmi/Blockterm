@@ -44,15 +44,24 @@ export async function runSetup(io: Io, path: string, existing: Config | null): P
     io.print('a model is required');
   }
 
-  const keyDefault = existing?.apiKeyEnv ?? defaultKeyEnv(provider);
-  const apiKeyEnv = (await io.ask('API key env var', keyDefault)).trim() || keyDefault;
+  const keep = existing !== null && existing.provider === provider;
+  const keyDefault = keep ? existing.apiKeyEnv : defaultKeyEnv(provider);
+  let apiKeyEnv: string;
+  for (;;) {
+    const answer = (await io.ask('API key env var', keyDefault)).trim() || keyDefault;
+    if (answer === '' || /^[A-Za-z_][A-Za-z0-9_]*$/.test(answer)) {
+      apiKeyEnv = answer;
+      break;
+    }
+    io.print('apiKeyEnv must be an environment variable name');
+  }
 
-  let baseURL = existing?.baseURL ?? null;
-  let name = existing?.name ?? null;
+  let baseURL = keep ? existing.baseURL : null;
+  let name = keep ? existing.name : null;
 
   if (provider === '@ai-sdk/openai-compatible') {
     for (;;) {
-      const answer = (await io.ask('Base URL', existing?.baseURL ?? undefined)).trim();
+      const answer = (await io.ask('Base URL', baseURL ?? undefined)).trim();
       const value = answer === '' ? baseURL : answer;
       if (value !== null && value !== '') {
         baseURL = value;
@@ -61,7 +70,7 @@ export async function runSetup(io: Io, path: string, existing: Config | null): P
       io.print('a base URL is required');
     }
     for (;;) {
-      const answer = (await io.ask('Name', existing?.name ?? undefined)).trim();
+      const answer = (await io.ask('Name', name ?? undefined)).trim();
       const value = answer === '' ? name : answer;
       if (value !== null && value !== '') {
         name = value;

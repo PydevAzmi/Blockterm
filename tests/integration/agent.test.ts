@@ -99,6 +99,7 @@ test('the agent runs a write end to end through openai-compatible', async () => 
     p.write('say ok\r');
 
     await waitFor(() => screen(host).includes('Type into'), 30000);
+    await new Promise(resolve => setTimeout(resolve, 500));
     p.write('y');
 
     // The composed frame begins every row with two chrome cells, so the PTY text

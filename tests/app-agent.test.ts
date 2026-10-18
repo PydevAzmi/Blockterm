@@ -219,6 +219,7 @@ test('approving the card types the keys into the pty', async () => {
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
   await until(() => output(stdout).includes('Type into'));
+  await wait(450);
   stdin.emit('data', 'y');
   await until(() => pty.written.some(w => String(w).includes('echo hi\r')));
   expect(pty.written.map(String).join('')).toContain('echo hi\r');
@@ -227,7 +228,7 @@ test('approving the card types the keys into the pty', async () => {
   await expect(run).resolves.toBe(0);
 });
 
-test('a card cannot be approved before its first render', async () => {
+test('an approval waits for a quiet pause after the card is shown', async () => {
   vi.useFakeTimers();
   try {
     const model = sendKeysThenDone();
@@ -237,15 +238,18 @@ test('a card cannot be approved before its first render', async () => {
     await vi.advanceTimersByTimeAsync(0);
     stdin.emit('data', 'hello\r');
     await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(output(stdout)).toContain('Type into');
 
-    stdin.emit('data', 'y');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(output(stdout)).not.toContain('❯ y');
-    expect(pty.written).toHaveLength(0);
+    for (let i = 0; i < 5; i += 1) {
+      stdin.emit('data', 'y');
+      await vi.advanceTimersByTimeAsync(100);
+      expect(pty.written).toHaveLength(0);
+    }
 
-    await vi.advanceTimersByTimeAsync(20);
+    await vi.advanceTimersByTimeAsync(450);
     stdin.emit('data', 'y');
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(50);
     expect(pty.written.map(String).join('')).toContain('echo hi\r');
 
     pty.exit(0);
@@ -253,6 +257,24 @@ test('a card cannot be approved before its first render', async () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+test('a provider error adds a note pointing at blockterm doctor', async () => {
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      throw new Error('provider down');
+    },
+  });
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('check your model with blockterm doctor'));
+  expect(output(stdout)).toContain('error: provider down');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
 });
 
 test('the transcript shows the agent reply', async () => {
@@ -263,6 +285,7 @@ test('the transcript shows the agent reply', async () => {
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
   await until(() => output(stdout).includes('Type into'));
+  await wait(450);
   stdin.emit('data', 'y');
   await until(() => output(stdout).includes('done'));
   expect(output(stdout)).toContain('done');
@@ -319,7 +342,7 @@ test('opening the overlay does not resize the pty', async () => {
   await expect(run).resolves.toBe(0);
 });
 
-test('mouse presses inside an open overlay never reach the pty', async () => {
+test('an overlay swallows mouse presses while focused and releases them once hidden', async () => {
   const { run, pty, stdin, stdout } = startApp({
     load: () => LOADED,
     model: okModel(sendKeysThenDone()),
@@ -330,11 +353,49 @@ test('mouse presses inside an open overlay never reach the pty', async () => {
   pty.emit('\x1b[?1000h');
   stdin.emit('data', '\x0b');
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
-  stdin.emit('data', '\x0b');
-  await wait(5);
+
   stdin.emit('data', '\x1b[<0;10;5M');
   await wait(20);
   expect(pty.written).toHaveLength(0);
+
+  stdin.emit('data', '\x0b');
+  await wait(5);
+  stdin.emit('data', '\x1b[<0;10;5M');
+  await until(() => pty.written.length > 0);
+  expect(pty.written).toHaveLength(1);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('escape closes an idle overlay panel', async () => {
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(sendKeysThenDone()) });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', '\x1b');
+  await until(() => !output(stdout).includes('agent · claude-haiku-5-5'));
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('closing a docked panel widens the pty back', async () => {
+  const { run, pty, stdin, stdout } = startApp({
+    load: () => LOADED,
+    model: okModel(sendKeysThenDone()),
+    cols: 200,
+    rows: 30,
+  });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  await until(() => pty.resizes.length >= 1);
+  expect(pty.resizes.at(-1)).toEqual([136, 27]);
+
+  stdin.emit('data', '\x1b');
+  await until(() => pty.resizes.length >= 2);
+  expect(pty.resizes.at(-1)).toEqual([196, 27]);
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);
@@ -383,6 +444,52 @@ test('a card too long to show rejects y but approves an edit with enter', async 
 
   stdin.emit('data', 'e');
   await wait(5);
+  stdin.emit('data', '\r');
+  await until(() => pty.written.length > 0);
+  expect(pty.written.map(String).join('')).toContain('echo xxxx');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('an edit whose keys do not all fit is not approved by enter', async () => {
+  const keys = `echo ${'x'.repeat(140)}<Enter>`;
+  const { run, pty, stdin, stdout } = startApp({
+    load: () => LOADED,
+    model: okModel(sendKeysModel(keys)),
+    cols: 100,
+    rows: 8,
+  });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('Type into'));
+  stdin.emit('data', 'e');
+  await wait(50);
+  stdin.emit('data', '\r');
+  await wait(50);
+  expect(pty.written).toHaveLength(0);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('the same edit fits and is approved in a wider panel', async () => {
+  const keys = `echo ${'x'.repeat(140)}<Enter>`;
+  const { run, pty, stdin, stdout } = startApp({
+    load: () => LOADED,
+    model: okModel(sendKeysModel(keys)),
+    cols: 200,
+    rows: 40,
+  });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('Type into'));
+  stdin.emit('data', 'e');
+  await wait(50);
   stdin.emit('data', '\r');
   await until(() => pty.written.length > 0);
   expect(pty.written.map(String).join('')).toContain('echo xxxx');

@@ -71,7 +71,12 @@ export function validateConfig(raw: unknown): LoadResult {
   if (typeof model !== 'string' || model.length === 0) return invalid('model is required');
 
   const apiKeyEnv = raw.apiKeyEnv === undefined ? defaultKeyEnv(pkg) : raw.apiKeyEnv;
-  if (typeof apiKeyEnv !== 'string') return invalid('apiKeyEnv must be a string');
+  if (
+    typeof apiKeyEnv !== 'string' ||
+    (apiKeyEnv !== '' && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(apiKeyEnv))
+  ) {
+    return invalid('apiKeyEnv must be an environment variable name');
+  }
 
   const baseURL = raw.baseURL === undefined ? null : raw.baseURL;
   const name = raw.name === undefined ? null : raw.name;

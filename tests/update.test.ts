@@ -7,6 +7,7 @@ import {
   type Step,
   detectInstall,
   runUpdate,
+  spawnStep,
   updateSteps,
 } from '../src/update.js';
 
@@ -93,7 +94,6 @@ test('a failed git pull explains how to recover', async () => {
     'Local changes or a diverged branch stopped the update. Commit or stash them, then run blockterm update again.',
   );
 });
-
 test('an npm update reads no root and uses the current directory', async () => {
   const cwds: string[] = [];
   await runUpdate({
@@ -105,4 +105,27 @@ test('an npm update reads no root and uses the current directory', async () => {
     print: () => {},
   });
   expect(cwds).toEqual([process.cwd()]);
+});
+
+test('a command that cannot start is reported without the diverged hint', async () => {
+  const printed: string[] = [];
+  const code = await runUpdate({
+    install: { kind: 'git', root: '/repo' },
+    run: async () => {
+      throw new Error('could not run git: spawn git ENOENT');
+    },
+    print: line => printed.push(line),
+  });
+
+  expect(code).toBe(1);
+  expect(printed).toContain('could not run git: spawn git ENOENT');
+  expect(printed).not.toContain(
+    'Local changes or a diverged branch stopped the update. Commit or stash them, then run blockterm update again.',
+  );
+});
+
+test('spawnStep rejects with the command and message when it cannot start', async () => {
+  await expect(
+    spawnStep({ cmd: 'blockterm-no-such-cmd-xyz', args: [] }, process.cwd()),
+  ).rejects.toThrow(/could not run blockterm-no-such-cmd-xyz:/);
 });

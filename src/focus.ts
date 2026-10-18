@@ -5,6 +5,7 @@ export interface PanelUi {
   open: boolean;
   focus: 'terminal' | 'panel';
   input: string;
+  inputTruncated?: boolean;
   mode: 'idle' | 'busy';
   card: null | {
     keys: string;
@@ -58,7 +59,10 @@ function submit(ui: PanelUi): { ui: PanelUi; actions: Action[] } {
 function plainBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] } {
   if (data === ESC) {
     if (ui.mode === 'busy') return { ui, actions: [{ type: 'cancel-task' }] };
-    return { ui: { ...ui, focus: 'terminal' }, actions: [] };
+    return {
+      ui: { ...ui, open: false, focus: 'terminal', input: '' },
+      actions: [{ type: 'layout-changed' }],
+    };
   }
   if (data.startsWith(ESC)) return { ui, actions: [] };
 
@@ -91,6 +95,7 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
       if (ch === DEL || ch === BS) {
         next = { ...next, input: deleteLast(next.input) };
       } else if (ch === '\r') {
+        if (next.inputTruncated === true) continue;
         const decision: Decision = card.editing
           ? { kind: 'approve', keys: next.input, allowRest: false }
           : { kind: 'deny', reason: next.input };
@@ -112,7 +117,10 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
 }
 
 function panelPaste(ui: PanelUi, text: string): { ui: PanelUi; actions: Action[] } {
-  if (ui.card === null || ui.card.editing || ui.card.denying) {
+  if (ui.card !== null && (ui.card.editing || ui.card.denying)) {
+    return { ui: { ...ui, input: ui.input + text.replace(/[\r\n]/g, '') }, actions: [] };
+  }
+  if (ui.card === null) {
     return { ui: { ...ui, input: ui.input + text }, actions: [] };
   }
   return { ui, actions: [] };

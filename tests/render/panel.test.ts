@@ -46,6 +46,14 @@ test('the title row shows the agent and model label', () => {
   expect(title).toContain('agent · claude-haiku-5-5');
 });
 
+test('the title model label is escaped', () => {
+  const cs = blank();
+  drawPanel(cs, FRAME_COLS, RECT, ui({ model: 'a\x1bb' }), [], null);
+  const title = rowText(cs, RECT.row).slice(INNER_COL);
+  expect(title).toContain('agent · a\\x1bb');
+  expect(cs.map(c => c.ch)).not.toContain('\x1b');
+});
+
 test('a long transcript line wraps within the inner width', () => {
   const cs = blank();
   const long = 'x'.repeat(60);
@@ -147,6 +155,38 @@ test('input and card target control characters are escaped', () => {
   expect(chars).not.toContain('\x07');
   expect(chars.join('')).toContain('\\x1b');
   expect(chars.join('')).toContain('\\x07');
+});
+
+test('a wrapped input is drawn across rows without dropping characters', () => {
+  const cs = blank();
+  const rect = { row: 1, col: 2, rows: 10, cols: 16 };
+  const result = drawPanel(
+    cs,
+    FRAME_COLS,
+    rect,
+    ui({ input: 'abcdefghijklmnopqrstuvwxyz' }),
+    [],
+    null,
+  );
+  expect(result.inputTruncated).toBe(false);
+  const all = Array.from({ length: rect.rows }, (_, i) =>
+    rowText(cs, rect.row + i).slice(rect.col),
+  ).join('');
+  expect(all).toContain('abcdefghijklm');
+  expect(all).toContain('xyz');
+});
+
+test('an input too long for the panel is reported truncated', () => {
+  const cs = blank();
+  const rect = { row: 1, col: 2, rows: 5, cols: 36 };
+  const result = drawPanel(cs, FRAME_COLS, rect, ui({ input: 'x'.repeat(300) }), [], null);
+  expect(result.inputTruncated).toBe(true);
+});
+
+test('an input that fits is not truncated', () => {
+  const cs = blank();
+  const result = drawPanel(cs, FRAME_COLS, RECT, ui({ input: 'hello' }), [], null);
+  expect(result.inputTruncated).toBe(false);
 });
 
 test('returns the cursor after the input prompt when focused', () => {

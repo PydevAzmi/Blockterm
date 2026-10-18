@@ -26,6 +26,7 @@ const CARD_NOTICE = 'too long to show — e to edit, n to deny, or widen the win
 export interface PanelDrawResult {
   cursor: { row: number; col: number } | null;
   cardTruncated: boolean;
+  inputTruncated: boolean;
 }
 
 function charWidth(ch: string): 1 | 2 {
@@ -137,10 +138,21 @@ export function drawPanel(
     }
   };
 
-  const title = ui.model !== undefined && ui.model !== '' ? `agent · ${ui.model}` : 'agent';
+  const title =
+    ui.model !== undefined && ui.model !== '' ? `agent · ${escapeControl(ui.model)}` : 'agent';
   writeRun(rect.row, innerCol, title, '', innerCols);
 
   const inputRow = rect.row + rect.rows - 1;
+  const promptWidth = Array.from(PROMPT).reduce((sum, ch) => sum + charWidth(ch), 0);
+  const inputWrapWidth = Math.max(1, innerCols - promptWidth);
+  const allInputLines = wrapLine(escapeControl(ui.input), inputWrapWidth);
+  const maxInputRows = Math.max(1, rect.rows - 1);
+  const inputTruncated = allInputLines.length > maxInputRows;
+  const inputLines = inputTruncated
+    ? allInputLines.slice(allInputLines.length - maxInputRows)
+    : allInputLines;
+  const inputTop = inputRow - (inputLines.length - 1);
+  const contentEnd = inputTop - 1;
 
   let cardRows: CardCell[][] = [];
   if (card !== null) {
@@ -175,7 +187,7 @@ export function drawPanel(
     for (const line of wrapLine(CARD_ACTIONS, innerCols)) cardRows.push(...cellsFor(line, AMBER));
   }
 
-  const cardBudget = Math.max(0, rect.rows - 2);
+  const cardBudget = Math.max(0, contentEnd - rect.row);
   const cardTruncated = card !== null && cardRows.length > cardBudget;
   let cardShown = cardRows;
   if (cardTruncated) {
@@ -185,7 +197,7 @@ export function drawPanel(
   const cardHeight = card !== null ? cardShown.length : 0;
 
   const transcriptTop = rect.row + 1;
-  const available = Math.max(0, inputRow - cardHeight - transcriptTop);
+  const available = Math.max(0, contentEnd - cardHeight - rect.row);
 
   const lines: string[] = [];
   for (const entry of transcript) {
@@ -199,16 +211,24 @@ export function drawPanel(
   }
 
   if (card !== null) {
-    let row = inputRow - cardHeight;
+    let row = contentEnd + 1 - cardHeight;
     for (const rowCells of cardShown) {
       drawCells(row, innerCol, rowCells);
       row += 1;
     }
   }
 
-  const inputX = writeRun(inputRow, innerCol, PROMPT, '', innerCols);
-  const endX = writeRun(inputRow, inputX, escapeControl(ui.input), '', innerCols - (inputX - innerCol));
+  let endX = innerCol + promptWidth;
+  for (let i = 0; i < inputLines.length; i += 1) {
+    const row = inputTop + i;
+    if (i === 0) {
+      const x = writeRun(row, innerCol, PROMPT, '', innerCols);
+      endX = writeRun(row, x, inputLines[i]!, '', innerCols - promptWidth);
+    } else {
+      endX = writeRun(row, innerCol + promptWidth, inputLines[i]!, '', innerCols - promptWidth);
+    }
+  }
 
   const cursor = ui.focus === 'panel' ? { row: inputRow, col: endX } : null;
-  return { cursor, cardTruncated };
+  return { cursor, cardTruncated, inputTruncated };
 }

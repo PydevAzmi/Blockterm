@@ -117,6 +117,29 @@ test('displayTokens: escapes zero-width and separators as \\uXXXX', () =>
     { kind: 'text', label: '\\u200B' },
   ]));
 
+test('displayTokens: escapes tag characters and variation selectors', () => {
+  expect(displayTokens(tokens('\u{E0041}'))).toEqual([
+    { kind: 'text', label: '\\u{E0041}' },
+  ]);
+  expect(displayTokens(tokens('\uFE0F'))).toEqual([
+    { kind: 'text', label: '\\uFE0F' },
+  ]);
+});
+
+test('displayTokens: escapes a soft hyphen and a word joiner', () => {
+  expect(displayTokens(tokens('\u00AD'))).toEqual([
+    { kind: 'text', label: '\\u00AD' },
+  ]);
+  expect(displayTokens(tokens('\u2060'))).toEqual([
+    { kind: 'text', label: '\\u2060' },
+  ]);
+});
+
+test('displayTokens: leaves an emoji unchanged', () =>
+  expect(displayTokens(tokens('\u{1F600}'))).toEqual([
+    { kind: 'text', label: '\u{1F600}' },
+  ]));
+
 test('displayTokens: escapes a literal backslash so \\xNN is unambiguous', () =>
   expect(displayTokens(tokens('a\\x0ab'))).toEqual([
     { kind: 'text', label: 'a\\\\x0ab' },

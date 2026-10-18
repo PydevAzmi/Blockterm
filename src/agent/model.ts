@@ -55,7 +55,7 @@ export function keyHint(platform: NodeJS.Platform, varName: string): string[] {
   ];
 }
 
-const SK_TOKEN = /sk-[A-Za-z0-9_-]{8,}/g;
+const SK_TOKEN = /\bsk-[A-Za-z0-9_-]{8,}/g;
 
 export function redact(text: string, secrets: string[]): string {
   let out = text;

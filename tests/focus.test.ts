@@ -78,10 +78,20 @@ test('a paste event inserts its text into the input', () => {
   expect(r.actions).toEqual([]);
 });
 
-test('escape with no card gives the terminal focus', () => {
+test('escape on an idle panel closes it and returns focus to the terminal', () => {
   const r = reduce(panel(), bytes('\x1b'));
   expect(r.ui.focus).toBe('terminal');
-  expect(r.actions).toEqual([]);
+  expect(r.ui.open).toBe(false);
+  expect(r.actions).toEqual([{ type: 'layout-changed' }]);
+});
+
+test('ctrl+k reopens the panel from a closed terminal', () => {
+  const closed = reduce(panel(), bytes('\x1b')).ui;
+  expect(closed.open).toBe(false);
+  const r = reduce(closed, { type: 'agent-key' });
+  expect(r.ui.open).toBe(true);
+  expect(r.ui.focus).toBe('panel');
+  expect(r.actions).toEqual([{ type: 'layout-changed' }]);
 });
 
 test('escape while busy with no card cancels the task', () => {
@@ -165,6 +175,27 @@ test('e prefills the input for editing and enter approves the edit', () => {
     { type: 'decide', decision: { kind: 'approve', keys: 'rm -rf /', allowRest: false } },
   ]);
   expect(r.ui.card).toBeNull();
+});
+
+test('enter in the edit field does nothing while the input is truncated', () => {
+  const editing = reduce(withCard(), bytes('e')).ui;
+  const r = reduce({ ...editing, input: 'x'.repeat(200), inputTruncated: true }, bytes('\r'));
+  expect(r.actions).toEqual([]);
+  expect(r.ui.card?.editing).toBe(true);
+});
+
+test('enter approves an edit once the input fits', () => {
+  const editing = reduce(withCard(), bytes('e')).ui;
+  const r = reduce({ ...editing, input: 'rm -rf /', inputTruncated: false }, bytes('\r'));
+  expect(r.actions).toEqual([
+    { type: 'decide', decision: { kind: 'approve', keys: 'rm -rf /', allowRest: false } },
+  ]);
+});
+
+test('pasting into the edit field strips carriage returns and newlines', () => {
+  const editing = reduce(withCard(), bytes('e')).ui;
+  const r = reduce({ ...editing, input: '' }, { type: 'paste', text: 'a\r\nb' });
+  expect(r.ui.input).toBe('ab');
 });
 
 test('a pending card does not steal bytes while the terminal has focus', () => {

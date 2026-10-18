@@ -30,13 +30,14 @@ export function updateSteps(install: InstallKind): Step[] {
 }
 
 export function spawnStep(step: Step, cwd: string): Promise<number> {
-  return new Promise(resolve => {
-    const child = spawn(step.cmd, step.args, {
-      stdio: 'inherit',
-      cwd,
-      shell: step.cmd === 'npm.cmd',
+  return new Promise((resolve, reject) => {
+    const useCmd = process.platform === 'win32' && step.cmd === 'npm.cmd';
+    const file = useCmd ? (process.env.ComSpec ?? 'cmd.exe') : step.cmd;
+    const args = useCmd ? ['/d', '/s', '/c', step.cmd, ...step.args] : step.args;
+    const child = spawn(file, args, { stdio: 'inherit', cwd });
+    child.on('error', error => {
+      reject(new Error(`could not run ${step.cmd}: ${error.message}`));
     });
-    child.on('error', () => resolve(1));
     child.on('exit', code => resolve(code ?? 1));
   });
 }
@@ -50,7 +51,13 @@ export async function runUpdate(o: {
 
   for (const step of updateSteps(o.install)) {
     o.print(`$ ${step.cmd} ${step.args.join(' ')}`);
-    const code = await o.run(step, cwd);
+    let code: number;
+    try {
+      code = await o.run(step, cwd);
+    } catch (err) {
+      o.print(err instanceof Error ? err.message : String(err));
+      return 1;
+    }
     if (code !== 0) {
       if (step.cmd === 'git' && step.args[0] === 'pull') o.print(DIVERGED);
       return code;

@@ -32,6 +32,8 @@ import { spawnSession } from './term/session.js';
 import type { TerminalSession } from './term/session.js';
 
 const CONFIG_HINT = 'Run `blockterm setup` to choose a model';
+const APPROVAL_QUIET_MS = 400;
+const APPROVE_KEYS = new Set(['y', 'a']);
 
 export function cardTokens(keys: string): { kind: 'text' | 'key'; label: string }[] {
   const parsed = parseKeys(keys);
@@ -52,6 +54,7 @@ export async function runApp(o: {
   modelFactory?: (config: Config) => ModelResult;
 }): Promise<number> {
   const { shell, stdin, stdout } = o;
+  globalThis.AI_SDK_LOG_WARNINGS = false;
   const load = o.loadConfig ?? ((): LoadResult =>
     readConfigFile(configPath(process.platform, process.env, homedir())));
   const factory = o.modelFactory ?? ((config: Config): ModelResult => createModel(config, process.env));
@@ -74,6 +77,8 @@ export async function runApp(o: {
     let ui = initialUi();
     const transcript: Transcript[] = [];
     let card: CardView | null = null;
+    let cardShownAt: number | null = null;
+    let lastKeyAt = Number.NEGATIVE_INFINITY;
     let pendingDecision: ((decision: Decision) => void) | null = null;
     let taskController: AbortController | null = null;
     let history: ModelMessage[] = [];
@@ -116,24 +121,33 @@ export async function runApp(o: {
         { title: 'blockterm', footer: FOOTER, footerStatus: statusText(), view: session.view },
         trackedModes.cursorVisible,
       );
-      if (layout.panel.mode !== 'hidden' && layout.panel.rect !== null) {
+      const overlay = layout.panel.mode === 'overlay';
+      const drawPanelNow =
+        layout.panel.mode !== 'hidden' && layout.panel.rect !== null && (!overlay || ui.focus === 'panel');
+      if (drawPanelNow) {
         const panel = drawPanel(
           frame.cells,
           frame.cols,
-          layout.panel.rect,
+          layout.panel.rect!,
           { ...ui, model: modelLabel },
           transcript,
           card,
         );
+        if (card !== null && cardShownAt === null) cardShownAt = Date.now();
         if (ui.focus === 'panel' && panel.cursor !== null) {
           frame.cursor = { row: panel.cursor.row, col: panel.cursor.col, visible: true };
         }
         if (ui.card !== null && (ui.card.truncated ?? false) !== panel.cardTruncated) {
           ui = { ...ui, card: { ...ui.card, truncated: panel.cardTruncated } };
         }
-      }
-      if (layout.panel.mode === 'overlay' && ui.focus !== 'panel') {
-        frame.cursor.visible = false;
+        if ((ui.inputTruncated ?? false) !== panel.inputTruncated) {
+          ui = { ...ui, inputTruncated: panel.inputTruncated };
+        }
+      } else if (card !== null) {
+        cardShownAt = null;
+        if (ui.card !== null && ui.card.truncated !== true) {
+          ui = { ...ui, card: { ...ui.card, truncated: true } };
+        }
       }
       const hostModes = hostModesFrom(session.mirror, trackedModes);
       const out = hostModeDiff(lastHostModes, hostModes) + renderDiff(lastFrame, frame);
@@ -169,6 +183,7 @@ export async function runApp(o: {
       const resolve = pendingDecision;
       pendingDecision = null;
       card = null;
+      cardShownAt = null;
       if (resolve !== null) resolve(decision);
       requestRender();
     };
@@ -212,6 +227,7 @@ export async function runApp(o: {
         case 'error':
           agentOpen = false;
           transcript.push({ who: 'error', text: event.message });
+          transcript.push({ who: 'note', text: 'check your model with blockterm doctor' });
           break;
         case 'limit':
           agentOpen = false;
@@ -280,8 +296,10 @@ export async function runApp(o: {
               pendingDecision = resolve;
               const tokens = cardTokens(keys);
               card = { target: session.program, tokens };
+              cardShownAt = null;
               ui = {
                 ...ui,
+                input: '',
                 card: {
                   keys,
                   target: session.program,
@@ -299,6 +317,7 @@ export async function runApp(o: {
       } finally {
         if (taskController === controller) taskController = null;
         card = null;
+        cardShownAt = null;
         pendingDecision = null;
         if (!stopped) {
           ui = { ...ui, mode: 'idle', card: null };
@@ -326,6 +345,7 @@ export async function runApp(o: {
               text: redact(error instanceof Error ? error.message : String(error), key === '' ? [] : [key]),
             });
             card = null;
+            cardShownAt = null;
             pendingDecision = null;
             ui = { ...ui, mode: 'idle', card: null };
             requestRender();
@@ -340,8 +360,18 @@ export async function runApp(o: {
       }
     };
 
+    const blocksApprove = (event: InputEvent, now: number, quiet: number): boolean => {
+      if (event.type !== 'bytes') return false;
+      if (ui.focus !== 'panel') return false;
+      const c = ui.card;
+      if (c === null || c.editing || c.denying || c.truncated === true) return false;
+      if (![...event.data].some(ch => APPROVE_KEYS.has(ch))) return false;
+      if (cardShownAt === null) return true;
+      return now - cardShownAt < APPROVAL_QUIET_MS || quiet < APPROVAL_QUIET_MS;
+    };
+
     const handleEvent = (event: InputEvent): void => {
-      if (event.type === 'mouse' && layout.panel.mode === 'overlay') {
+      if (event.type === 'mouse' && ui.focus === 'panel' && layout.panel.mode === 'overlay') {
         const rect = layout.panel.rect;
         if (
           rect !== null &&
@@ -353,6 +383,13 @@ export async function runApp(o: {
           return;
         }
       }
+      const now = Date.now();
+      const quiet = now - lastKeyAt;
+      if (blocksApprove(event, now, quiet)) {
+        lastKeyAt = now;
+        return;
+      }
+      lastKeyAt = now;
       const result = reduce(ui, event);
       ui = result.ui;
       if (ui.open && config === null && !configNoticeShown) {

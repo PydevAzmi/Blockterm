@@ -102,15 +102,8 @@ export function keysToBytes(tokens: KeyToken[], appCursor: boolean): string {
   return out;
 }
 
-function isHidden(code: number): boolean {
-  if (code >= 0x80 && code <= 0x9f) return true;
-  if (code === 0x061c || code === 0x200e || code === 0x200f) return true;
-  if (code >= 0x202a && code <= 0x202e) return true;
-  if (code >= 0x2066 && code <= 0x2069) return true;
-  if (code >= 0x200b && code <= 0x200d) return true;
-  if (code === 0x2028 || code === 0x2029 || code === 0xfeff) return true;
-  return false;
-}
+const HIDDEN =
+  /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\u115F\u1160\u3164\uFFA0\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/u;
 
 export function escapeControl(value: string): string {
   let out = '';
@@ -120,8 +113,9 @@ export function escapeControl(value: string): string {
       out += `\\x${code.toString(16).padStart(2, '0')}`;
     } else if (code === 0x5c) {
       out += '\\\\';
-    } else if (isHidden(code)) {
-      out += `\\u${code.toString(16).toUpperCase().padStart(4, '0')}`;
+    } else if (HIDDEN.test(ch)) {
+      const hex = code.toString(16).toUpperCase();
+      out += code <= 0xffff ? `\\u${hex.padStart(4, '0')}` : `\\u{${hex}}`;
     } else {
       out += ch;
     }

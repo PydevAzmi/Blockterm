@@ -82,6 +82,9 @@ test('redact: scrubs sk- tokens even without a known secret', () => {
 test('redact: ignores an empty secret', () =>
   expect(redact('nothing to hide', [''])).toBe('nothing to hide'));
 
+test('redact: a sk- run inside a word is not treated as a token', () =>
+  expect(redact('task-runner-xyzabc', [])).toBe('task-runner-xyzabc'));
+
 test('ModelResult never leaks the key', () => {
   const env = { ANTHROPIC_API_KEY: 'sk-secret-123' };
   const results = [

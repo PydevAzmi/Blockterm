@@ -4,7 +4,6 @@ import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
-import { runApp } from './app.js';
 import { configPath, loadConfig } from './config.js';
 import { runDoctor } from './doctor.js';
 import { type Io, runSetup } from './setup.js';
@@ -235,6 +234,7 @@ async function main(): Promise<void> {
   }
 
   try {
+    const { runApp } = await import('./app.js');
     const code = await runApp({ shell, stdin, stdout, loadConfig: () => loaded });
     process.exit(code);
   } catch (err) {

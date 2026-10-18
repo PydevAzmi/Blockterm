@@ -54,4 +54,4 @@ The agent reads whatever is on your screen — a remote shell, a vim buffer — 
 
 ### Privacy
 
-When you ask the agent something, the text currently on your screen is sent to the model provider you chose. Nothing is sent until you ask, and typed input only reaches your shell after you approve it.
+When the agent reads your screen, the visible text and up to 500 lines of scrollback are sent to the provider you chose. Nothing is sent until you ask, and typed input only reaches your shell after you approve it.
