@@ -131,6 +131,25 @@ test('commandText keeps CJK characters whole', async () => {
   expect(output?.commandText).toBe('echo 世界');
 });
 
+test('commandText keeps interior blank cells on non-last rows', async () => {
+  const mirror = makeMirror();
+  const marks = collect(mirror);
+  await write(mirror, '\x1b]133;B\x07echo a\x1b[3Cb\r\n> c\x1b]133;C\x07');
+
+  const output = marks.find(m => m.kind === 'output');
+  expect(output).toEqual({ kind: 'output', row: 1, commandText: 'echo a   b\n> c' });
+});
+
+test('an A mark resets a running block', async () => {
+  const mirror = makeMirror();
+  const marks = collect(mirror);
+  await write(mirror, '\x1b]133;A\x07\x1b]133;B\x07x\r\n\x1b]133;C\x07');
+  await write(mirror, '\x1b]133;A\x07\x1b]133;B\x07y\r\n\x1b]133;C\x07\x1b]133;D;0\x07');
+
+  expect(marks.filter(m => m.kind === 'output')).toHaveLength(2);
+  expect(marks.filter(m => m.kind === 'done')).toHaveLength(1);
+});
+
 test('command rows survive scrollback', async () => {
   const mirror = makeMirror(20, 5);
   const marks = collect(mirror);
@@ -141,7 +160,7 @@ test('command rows survive scrollback', async () => {
   const output = marks.find(m => m.kind === 'output');
   expect(command?.row).toBe(0);
   expect(output?.row).toBe(13);
-  expect(output?.commandText.startsWith('top\n')).toBe(true);
+  expect(output?.commandText).toBe(`top\n${new Array(12).fill('x').join('\n')}`);
 });
 
 test('markers are disposed and handlers stop after dispose', async () => {
@@ -186,7 +205,7 @@ test('a second C while running is ignored', async () => {
   expect(marks.filter(m => m.kind === 'output')).toHaveLength(1);
 });
 
-test('OSC 7 with an empty path is ignored and falls through', async () => {
+test('OSC 7: only an empty path is ignored, root is a cwd', async () => {
   const mirror = makeMirror();
   const seen: string[] = [];
   mirror.parser.registerOscHandler(7, data => {
@@ -196,9 +215,12 @@ test('OSC 7 with an empty path is ignored and falls through', async () => {
   const marks = collect(mirror);
 
   await write(mirror, '\x1b]7;file://host\x07');
-  await write(mirror, '\x1b]7;file:///\x07');
   expect(marks).toEqual([]);
-  expect(seen).toEqual(['file://host', 'file:///']);
+  expect(seen).toEqual(['file://host']);
+
+  await write(mirror, '\x1b]7;file:///\x07');
+  expect(marks).toEqual([{ kind: 'cwd', path: '/' }]);
+  expect(seen).toEqual(['file://host']);
 });
 
 test('fall-through: unknown 133 sub-commands reach later handlers', async () => {

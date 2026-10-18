@@ -38,13 +38,8 @@ function lastContentColumn(line: IBufferLine, from: number, limit: number): numb
 }
 
 function rowText(line: IBufferLine, from: number): string {
-  let text = '';
   const end = lastContentColumn(line, from, line.length);
-  for (let x = from; x < end; x++) {
-    const cell = line.getCell(x);
-    if (cell) text += cell.getChars();
-  }
-  return text;
+  return line.translateToString(false, from, end);
 }
 
 function readText(
@@ -71,7 +66,7 @@ function decodeCwd(data: string): string | null {
   const rest = data.slice('file://'.length);
   const slash = rest.indexOf('/');
   const path = slash === -1 ? '' : rest.slice(slash);
-  if (path === '' || path === '/') return null;
+  if (path === '') return null;
   let decoded: string;
   try {
     decoded = decodeURIComponent(path);
@@ -102,6 +97,7 @@ export function watchMarks(mirror: Terminal, onMark: (m: Mark) => void): IDispos
       if (promptPending) return true;
       promptPending = true;
       commandPending = false;
+      running = false;
       onMark({ kind: 'prompt', row: snapshotRow(mirror) });
       return true;
     }
