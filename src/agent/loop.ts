@@ -39,6 +39,8 @@ type SendResult =
   | { status: 'done'; sent: string; edited: boolean }
   | { status: 'denied'; reason: string };
 
+type ToolOutcome = SendResult | { status: 'cancelled' };
+
 const DEFAULT_MAX_TOOL_CALLS = 25;
 const DEFAULT_MAX_MS = 10 * 60 * 1000;
 const ABORTED = 'blockterm: aborted';
@@ -101,18 +103,19 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
 
   const awaitDecision = async (keys: string): Promise<Decision | 'abort'> => {
     emit({ type: 'approval', keys, target: o.target() });
+    if (o.signal.aborted) return 'abort';
+    let onAbort: (() => void) | undefined;
     const aborted = new Promise<Decision>((_, reject) => {
-      if (o.signal.aborted) {
-        reject(abortError());
-        return;
-      }
-      o.signal.addEventListener('abort', () => reject(abortError()), { once: true });
+      onAbort = (): void => reject(abortError());
+      o.signal.addEventListener('abort', onAbort, { once: true });
     });
     try {
       return await Promise.race([o.approve(keys), aborted]);
     } catch (error) {
       if (isAbort(error, o.signal)) return 'abort';
       throw error;
+    } finally {
+      if (onAbort !== undefined) o.signal.removeEventListener('abort', onAbort);
     }
   };
 
@@ -164,9 +167,13 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
         messages,
         tools,
         stopWhen: ({ steps }) =>
+          now() - start > maxMs ||
           usedAtStart + steps.reduce((total, step) => total + step.toolCalls.length, 0) >=
-          maxToolCalls,
+            maxToolCalls,
         abortSignal: o.signal,
+        // Errors are reported to the caller via events; never log the raw error
+        // (the SDK default prints it, including secrets, to the terminal).
+        onError: () => {},
       });
 
       let callsThisCall = 0;
@@ -179,10 +186,13 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
             emit({ type: 'text', delta: part.text });
           } else if (part.type === 'tool-call') {
             callsThisCall += 1;
-            if (part.toolName === 'send_keys') {
-              pending.push({ toolCallId: part.toolCallId, input: part.input });
-            } else if (readNames.has(part.toolName)) {
-              emit({ type: 'tool', name: part.toolName });
+            // Invalid calls already have an error result recorded by the SDK.
+            if (part.invalid !== true) {
+              if (part.toolName === 'send_keys') {
+                pending.push({ toolCallId: part.toolCallId, input: part.input });
+              } else if (readNames.has(part.toolName)) {
+                emit({ type: 'tool', name: part.toolName });
+              }
             }
           } else if (part.type === 'error') {
             streamError = messageOf(part.error);
@@ -214,21 +224,48 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
         continue;
       }
 
-      const results = [];
-      for (const call of pending) {
-        const outcome = await handleSendKeys(call.input);
+      const results: {
+        type: 'tool-result';
+        toolCallId: string;
+        toolName: 'send_keys';
+        output: { type: 'json'; value: ToolOutcome };
+      }[] = [];
+      const pushResults = (): void => {
+        messages.push({ role: 'tool', content: results });
+      };
+      const resultFor = (toolCallId: string, value: ToolOutcome): (typeof results)[number] => ({
+        type: 'tool-result',
+        toolCallId,
+        toolName: 'send_keys',
+        output: { type: 'json', value },
+      });
+
+      for (let index = 0; index < pending.length; index += 1) {
+        const call = pending[index]!;
+        let outcome: SendResult | 'abort';
+        try {
+          outcome = await handleSendKeys(call.input);
+        } catch (error) {
+          const message = messageOf(error);
+          for (let rest = index; rest < pending.length; rest += 1) {
+            results.push(resultFor(pending[rest]!.toolCallId, { status: 'error', message }));
+          }
+          pushResults();
+          if (isAbort(error, o.signal)) emit({ type: 'cancelled' });
+          else emit({ type: 'error', message });
+          return messages;
+        }
         if (outcome === 'abort') {
+          for (let rest = index; rest < pending.length; rest += 1) {
+            results.push(resultFor(pending[rest]!.toolCallId, { status: 'cancelled' }));
+          }
+          pushResults();
           emit({ type: 'cancelled' });
           return messages;
         }
-        results.push({
-          type: 'tool-result' as const,
-          toolCallId: call.toolCallId,
-          toolName: 'send_keys',
-          output: { type: 'json' as const, value: outcome },
-        });
+        results.push(resultFor(call.toolCallId, outcome));
       }
-      messages.push({ role: 'tool', content: results });
+      pushResults();
     }
   } catch (error) {
     if (isAbort(error, o.signal)) emit({ type: 'cancelled' });

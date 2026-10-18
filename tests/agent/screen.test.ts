@@ -148,3 +148,38 @@ test('waitForQuiet: maxMs 99999 is capped to 15000', async () => {
     vi.useRealTimers();
   }
 });
+
+test('waitForQuiet: resolves immediately when the signal is already aborted', async () => {
+  vi.useFakeTimers();
+  try {
+    const s = fakeSession();
+    const controller = new AbortController();
+    controller.abort();
+    await waitForQuiet(s, 15000, 400, controller.signal);
+    expect(s.listeners()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('waitForQuiet: resolves and disposes when aborted while waiting', async () => {
+  vi.useFakeTimers();
+  try {
+    const s = fakeSession();
+    const controller = new AbortController();
+    const p = waitForQuiet(s, 15000, 400, controller.signal);
+    let settled = false;
+    void p.then(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(false);
+    controller.abort();
+    await p;
+    expect(settled).toBe(true);
+    expect(s.listeners()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});

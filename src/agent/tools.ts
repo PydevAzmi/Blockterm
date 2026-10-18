@@ -49,8 +49,8 @@ export function readTools(ctx: ToolContext): ToolSet {
         required: ['ms'],
         additionalProperties: false,
       }),
-      execute: async ({ ms }) => {
-        await waitForQuiet(ctx.session, ms);
+      execute: async ({ ms }, { abortSignal }) => {
+        await waitForQuiet(ctx.session, ms, 400, abortSignal);
         return readScreen(ctx.session);
       },
     }),

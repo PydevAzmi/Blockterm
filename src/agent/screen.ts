@@ -53,6 +53,7 @@ export function waitForQuiet(
   session: Pick<TerminalSession, 'onParsed'>,
   maxMs: number,
   quietMs = 400,
+  signal?: AbortSignal,
 ): Promise<void> {
   const cap = Math.min(maxMs, 15000);
 
@@ -60,13 +61,20 @@ export function waitForQuiet(
     let quiet: ReturnType<typeof setTimeout> | undefined;
     let max: ReturnType<typeof setTimeout> | undefined;
     let sub: { dispose(): void } | undefined;
+    let onAbort: (() => void) | undefined;
 
     const done = (): void => {
       if (quiet !== undefined) clearTimeout(quiet);
       if (max !== undefined) clearTimeout(max);
       sub?.dispose();
+      if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
       resolve();
     };
+
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
 
     sub = session.onParsed(() => {
       if (quiet !== undefined) clearTimeout(quiet);
@@ -75,5 +83,10 @@ export function waitForQuiet(
 
     quiet = setTimeout(done, quietMs);
     max = setTimeout(done, cap);
+
+    if (signal !== undefined) {
+      onAbort = done;
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
   });
 }
