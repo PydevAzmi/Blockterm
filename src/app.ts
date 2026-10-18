@@ -26,6 +26,7 @@ import { drawPanel } from './render/panel.js';
 import type { CardView, Transcript } from './render/panel.js';
 import { createFrameScheduler } from './render/schedule.js';
 import type { ShellChoice } from './shell.js';
+import { inject } from './shellint/inject.js';
 import { hostModeDiff, hostModesFrom, trackModes } from './term/modes.js';
 import type { HostModes } from './term/modes.js';
 import { spawnSession } from './term/session.js';
@@ -91,12 +92,23 @@ export async function runApp(o: {
     let layout = computeLayout({ cols: stdout.columns, rows: stdout.rows });
     const startSession = o.createSession ?? spawnSession;
 
-    const session = startSession(shell, layout.pty, {
+    const sessionEnv: Record<string, string | undefined> = {
       ...process.env,
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
       TERM_PROGRAM: 'blockterm',
-    });
+    };
+    const injection = inject(shell, sessionEnv);
+    let session: TerminalSession;
+    try {
+      session = startSession({ file: injection.file, args: injection.args }, layout.pty, {
+        ...sessionEnv,
+        ...injection.env,
+      });
+    } catch (err) {
+      injection.cleanup();
+      throw err;
+    }
     const tracked = trackModes(session.mirror);
     const tokenizer = new InputTokenizer();
 
@@ -483,6 +495,7 @@ export async function runApp(o: {
       parsed.dispose();
       tracked.dispose();
       session.dispose();
+      injection.cleanup();
     };
 
     const exitCode = await new Promise<number>((resolve) => {
