@@ -742,3 +742,88 @@ test('25 tool call limit leaves no dangling tool calls', async () => {
   assertHistoryComplete(history);
 });
 
+test('abort during allow-rest approval cancels the remaining auto-sends', async () => {
+  const { pty, session, events } = harness();
+  const controller = new AbortController();
+  const approveCalls: string[] = [];
+  let n = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      if (n !== 1) return textStream('done');
+      const json1 = JSON.stringify({ keys: 'a<Enter>' });
+      const json2 = JSON.stringify({ keys: 'b<Enter>' });
+      return {
+        stream: convertArrayToReadableStream([
+          { type: 'tool-input-start', id: 'c1', toolName: 'send_keys' },
+          { type: 'tool-input-delta', id: 'c1', delta: json1 },
+          { type: 'tool-input-end', id: 'c1' },
+          { type: 'tool-call', toolCallId: 'c1', toolName: 'send_keys', input: json1 },
+          { type: 'tool-input-start', id: 'c2', toolName: 'send_keys' },
+          { type: 'tool-input-delta', id: 'c2', delta: json2 },
+          { type: 'tool-input-end', id: 'c2' },
+          { type: 'tool-call', toolCallId: 'c2', toolName: 'send_keys', input: json2 },
+          { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage: USAGE },
+        ]),
+      };
+    },
+  });
+
+  const history = await runTask({
+    model,
+    system: 'sys',
+    history: [],
+    prompt: 'go',
+    ctx: { session, appCursor: () => false },
+    target: () => 'shell',
+    approve: async keys => {
+      approveCalls.push(keys);
+      controller.abort();
+      return { kind: 'approve', keys, allowRest: true };
+    },
+    onEvent: e => events.push(e),
+    signal: controller.signal,
+    secrets: [],
+  });
+
+  expect(approveCalls).toEqual(['a<Enter>']);
+  expect(pty.written).toEqual([]);
+  expect(events).toContainEqual({ type: 'cancelled' });
+  assertHistoryComplete(history);
+  const results = history.at(-1) as {
+    content: { toolCallId: string; output: { value: { status: string } } }[];
+  };
+  expect(results.content.map(p => p.toolCallId)).toEqual(['c1', 'c2']);
+  expect(results.content.map(p => p.output.value.status)).toEqual(['cancelled', 'cancelled']);
+});
+
+test('approval error stored in history is redacted', async () => {
+  const { pty, session, events } = harness();
+  let n = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      if (n !== 1) return textStream('done');
+      return callStream('c1', 'send_keys', { keys: 'ls<Enter>' });
+    },
+  });
+
+  const history = await runTask({
+    model,
+    system: 'sys',
+    history: [],
+    prompt: 'go',
+    ctx: { session, appCursor: () => false },
+    target: () => 'shell',
+    approve: async () => {
+      throw new Error('boom sk-secret-123');
+    },
+    onEvent: e => events.push(e),
+    signal: new AbortController().signal,
+    secrets: ['sk-secret-123'],
+  });
+
+  expect(pty.written).toEqual([]);
+  expect(JSON.stringify(history)).not.toContain('sk-secret-123');
+});
+

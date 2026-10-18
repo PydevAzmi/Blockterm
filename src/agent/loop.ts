@@ -120,6 +120,7 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
   };
 
   const handleSendKeys = async (rawInput: unknown): Promise<SendResult | 'abort'> => {
+    if (o.signal.aborted) return 'abort';
     const keys =
       typeof rawInput === 'object' && rawInput !== null && 'keys' in rawInput
         ? String((rawInput as { keys: unknown }).keys)
@@ -128,6 +129,7 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
     if (!parsed.ok) return { status: 'error', message: parsed.message };
 
     if (allowRest) {
+      if (o.signal.aborted) return 'abort';
       const bytes = keysToBytes(parsed.tokens, o.ctx.appCursor());
       o.ctx.session.write(bytes);
       emit({ type: 'sent', keys, auto: true });
@@ -140,6 +142,7 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
 
     const chosen = parseKeys(decision.keys);
     if (!chosen.ok) return { status: 'error', message: chosen.message };
+    if (o.signal.aborted) return 'abort';
     if (decision.allowRest) allowRest = true;
 
     const bytes = keysToBytes(chosen.tokens, o.ctx.appCursor());
@@ -246,7 +249,7 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
         try {
           outcome = await handleSendKeys(call.input);
         } catch (error) {
-          const message = messageOf(error);
+          const message = redact(messageOf(error), secrets);
           for (let rest = index; rest < pending.length; rest += 1) {
             results.push(resultFor(pending[rest]!.toolCallId, { status: 'error', message }));
           }
