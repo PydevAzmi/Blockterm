@@ -210,6 +210,30 @@ test('the selected block borders are bold cyan and the rows are not cached', asy
   expect(find(plain.rows[0]!, '✔').sgr).toBe('32');
 });
 
+test('highlight marks only the outline, not box-drawing output inside the block', async () => {
+  const { mirror, store } = await finishedBlock({
+    command: 'tree',
+    body: '│ tree │\r\nafter',
+    after: '\x1b]133;A\x07$ ',
+  });
+  const id = store.blocks[0]!.id;
+  const selected = composeBlocks(mirror, { store, scroll: 0, selected: id }, { cols: 40, rows: 12 }, 5000);
+  const bottom = selected.rows.findIndex(row => rowText(row).startsWith('└'));
+
+  expect(selected.rows[0]!.every(cell => cell.sgr === '1;36')).toBe(true);
+  expect(selected.rows[1]![0]!.sgr).toBe('1;36');
+  expect(selected.rows[1]![39]!.sgr).toBe('1;36');
+  expect(selected.rows[1]![1]!.ch).toBe('│');
+  expect(selected.rows[1]![1]!.sgr).toBe('');
+  expect(selected.rows[1]![8]!.ch).toBe('│');
+  expect(selected.rows[1]![8]!.sgr).toBe('');
+  expect(selected.rows[bottom]!.every(cell => cell.sgr === '1;36')).toBe(true);
+
+  const plain = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
+  expect(plain.rows[0]![0]!.sgr).toBe('');
+  expect(plain.rows[1]![1]!.sgr).toBe('');
+});
+
 test('blockRows reports each block top and height in document rows', async () => {
   const { mirror, store } = await finishedBlock({
     command: 'ls',

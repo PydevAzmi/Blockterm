@@ -135,7 +135,9 @@ export async function runApp(o: {
     let newOutput = false;
     let lastDocHeight = 0;
     let selected: number | null = null;
+    let revealSelected = false;
     let selectionNotice: string | null = null;
+    let selectionNoticeTimer: ReturnType<typeof setTimeout> | null = null;
     let branch: string | null = null;
     let knownCwd: string | null = null;
     let lastBlockId = 0;
@@ -203,27 +205,35 @@ export async function runApp(o: {
         if (scroll === 0) newOutput = false;
         if (scroll !== before) requestRender();
       }
-      if (
-        selected !== null &&
-        frame.blockRows !== undefined &&
-        frame.blocksDocHeight !== undefined
-      ) {
-        const row = frame.blockRows.find(block => block.id === selected);
-        if (row !== undefined) {
-          const max = Math.max(0, frame.blocksDocHeight - layout.pty.rows);
-          const current = Math.min(Math.max(0, Math.floor(scroll)), max);
-          const viewStart = Math.max(0, frame.blocksDocHeight - layout.pty.rows - current);
-          const viewEnd = viewStart + layout.pty.rows;
-          let next = current;
-          if (row.top < viewStart) {
-            next = Math.min(max, frame.blocksDocHeight - layout.pty.rows - row.top);
-          } else if (row.top + row.height > viewEnd) {
-            next = frame.blocksDocHeight - row.top - row.height;
-          }
-          next = Math.max(0, Math.min(max, next));
-          if (next !== scroll) {
-            scroll = next;
-            requestRender();
+      if (revealSelected) {
+        revealSelected = false;
+        if (
+          selected !== null &&
+          frame.blockRows !== undefined &&
+          frame.blocksDocHeight !== undefined
+        ) {
+          const row = frame.blockRows.find(block => block.id === selected);
+          if (row !== undefined) {
+            const viewport = layout.pty.rows;
+            const max = Math.max(0, frame.blocksDocHeight - viewport);
+            const current = Math.min(Math.max(0, Math.floor(scroll)), max);
+            let next = current;
+            if (row.height >= viewport) {
+              next = frame.blocksDocHeight - viewport - row.top;
+            } else {
+              const viewStart = Math.max(0, frame.blocksDocHeight - viewport - current);
+              const viewEnd = viewStart + viewport;
+              if (row.top < viewStart) {
+                next = frame.blocksDocHeight - viewport - row.top;
+              } else if (row.top + row.height > viewEnd) {
+                next = frame.blocksDocHeight - row.top - row.height;
+              }
+            }
+            next = Math.max(0, Math.min(max, next));
+            if (next !== scroll) {
+              scroll = next;
+              requestRender();
+            }
           }
         }
       }
@@ -290,6 +300,31 @@ export async function runApp(o: {
     };
     const ticker = createRunningTicker(requestRender);
 
+    const clearSelectionNotice = (): void => {
+      selectionNotice = null;
+      if (selectionNoticeTimer !== null) {
+        clearTimeout(selectionNoticeTimer);
+        selectionNoticeTimer = null;
+      }
+    };
+
+    const showSelectionNotice = (text: string, ttlMs = 0): void => {
+      if (selectionNoticeTimer !== null) {
+        clearTimeout(selectionNoticeTimer);
+        selectionNoticeTimer = null;
+      }
+      selectionNotice = text;
+      if (ttlMs > 0) {
+        selectionNoticeTimer = setTimeout(() => {
+          selectionNoticeTimer = null;
+          if (selectionNotice === text) {
+            selectionNotice = null;
+            requestRender();
+          }
+        }, ttlMs);
+      }
+    };
+
     const syncBranch = (): void => {
       branch = knownCwd === null ? null : gitBranch(knownCwd);
     };
@@ -342,7 +377,12 @@ export async function runApp(o: {
               return;
             }
             const frame = lastFrame;
-            if (frame?.blockRows !== undefined && frame.blocksDocHeight !== undefined) {
+            if (
+              ui.focus === 'terminal' &&
+              hash === null &&
+              frame?.blockRows !== undefined &&
+              frame.blocksDocHeight !== undefined
+            ) {
               const max = Math.max(0, frame.blocksDocHeight - layout.pty.rows);
               const current = Math.min(Math.max(0, scroll), max);
               const start = Math.max(0, frame.blocksDocHeight - layout.pty.rows - current);
@@ -352,7 +392,8 @@ export async function runApp(o: {
               );
               if (block !== undefined) {
                 selected = block.id;
-                selectionNotice = null;
+                revealSelected = true;
+                clearSelectionNotice();
                 requestRender();
                 return;
               }
@@ -367,7 +408,7 @@ export async function runApp(o: {
 
       if (
         event.type === 'bytes' &&
-        (event.data === '\x1b[1;5A' || event.data === '\x1b[1;5B') &&
+        event.data === '\x1b[1;5A' &&
         session.view === 'blocks' &&
         store.integrated &&
         ui.focus === 'terminal' &&
@@ -377,9 +418,10 @@ export async function runApp(o: {
         selected = moveSelection(
           store.blocks.map(block => block.id),
           selected,
-          event.data === '\x1b[1;5A' ? 'prev' : 'next',
+          'prev',
         );
-        selectionNotice = null;
+        revealSelected = selected !== null;
+        clearSelectionNotice();
         requestRender();
         return;
       }
@@ -754,12 +796,12 @@ export async function runApp(o: {
 
     const rerunSelected = (block: (typeof store.blocks)[number]): void => {
       if (!store.isIdlePrompt()) {
-        selectionNotice = 'not at an idle prompt';
+        showSelectionNotice('not at an idle prompt');
         return;
       }
       if (block.command.includes('\n') || block.command.includes('\r')) {
         if (!session.mirror.modes.bracketedPasteMode) {
-          selectionNotice = 'multi-line rerun needs bracketed paste';
+          showSelectionNotice('multi-line rerun needs bracketed paste');
           return;
         }
         session.write(`\x1b[200~${block.command}\x1b[201~\r`);
@@ -769,12 +811,13 @@ export async function runApp(o: {
       scroll = 0;
       newOutput = false;
       selected = null;
-      selectionNotice = null;
+      revealSelected = false;
+      clearSelectionNotice();
       requestRender();
     };
 
     const handleSelectionKey = (key: SelectionKey): void => {
-      selectionNotice = null;
+      clearSelectionNotice();
       switch (key) {
         case 'prev':
         case 'next': {
@@ -783,6 +826,7 @@ export async function runApp(o: {
             selected,
             key,
           );
+          revealSelected = selected !== null;
           break;
         }
         case 'copy-command':
@@ -800,14 +844,22 @@ export async function runApp(o: {
         }
         case 'explain': {
           const block = selectionBlock();
-          if (block !== null && ui.mode !== 'busy' && taskController === null) {
-            explainBlock(block.id);
-            selected = null;
+          if (block !== null) {
+            if (block.exitCode !== 0) {
+              if (ui.mode !== 'busy' && taskController === null) {
+                explainBlock(block.id);
+                selected = null;
+                revealSelected = false;
+              }
+            } else {
+              showSelectionNotice('nothing to explain', 2000);
+            }
           }
           break;
         }
         case 'exit':
           selected = null;
+          revealSelected = false;
           break;
         case 'scroll-page-up':
           scrollBy(layout.pty.rows - 1);
@@ -984,7 +1036,8 @@ export async function runApp(o: {
       lastBlockId = newest;
       if (selected !== null && !store.blocks.some(block => block.id === selected)) {
         selected = null;
-        selectionNotice = null;
+        revealSelected = false;
+        clearSelectionNotice();
       }
       if (scroll > 0) newOutput = true;
       requestRender();
@@ -992,7 +1045,8 @@ export async function runApp(o: {
     const parsed = session.onParsed(() => {
       if (selected !== null && session.view !== 'blocks') {
         selected = null;
-        selectionNotice = null;
+        revealSelected = false;
+        clearSelectionNotice();
       }
       if (scroll > 0) newOutput = true;
       requestRender();
@@ -1009,6 +1063,7 @@ export async function runApp(o: {
       ticker.dispose();
       if (inputTimer !== null) clearTimeout(inputTimer);
       if (resizeTimer !== null) clearTimeout(resizeTimer);
+      if (selectionNoticeTimer !== null) clearTimeout(selectionNoticeTimer);
       stdin.off('data', onData);
       stdout.off('resize', onResize);
       parsed.dispose();

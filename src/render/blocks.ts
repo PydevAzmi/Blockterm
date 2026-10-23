@@ -36,18 +36,20 @@ export interface BlocksResult {
 const EXPLAIN_LABEL = '[Explain error]';
 const EXPLAIN_WIDTH = 15;
 const SELECTED_SGR = '1;36';
-const BORDER_CHARS = new Set(['┌', '┐', '└', '┘', '│', '─']);
 
 function blank(sgr = ''): Cell {
   return { ch: ' ', width: 1, sgr };
 }
 
-function highlighted(rows: Cell[][]): Cell[][] {
-  return rows.map(row =>
-    row.map(cell =>
-      BORDER_CHARS.has(cell.ch) ? { ...cell, sgr: SELECTED_SGR } : cell,
-    ),
-  );
+function highlightRow(row: Cell[], index: number, last: number): Cell[] {
+  if (index === 0 || index === last) return row.map(cell => ({ ...cell, sgr: SELECTED_SGR }));
+  const out = row.slice();
+  const left = out[0];
+  if (left !== undefined) out[0] = { ...left, sgr: SELECTED_SGR };
+  const rightIndex = out.length - 1;
+  const right = out[rightIndex];
+  if (right !== undefined) out[rightIndex] = { ...right, sgr: SELECTED_SGR };
+  return out;
 }
 
 function charWidth(ch: string): 1 | 2 {
@@ -320,16 +322,16 @@ export function composeBlocks(
     start: number;
     rows: Cell[][];
     actions: BlockAction[];
+    selected: boolean;
   }[] = [];
   const blockRows: BlockRow[] = [];
   let docHeight = 0;
   for (const block of view.store.blocks) {
     const cached = cachedRows(block, cols, inner, area.rows, now);
-    const rows =
-      view.selected === block.id ? highlighted(cached.rows) : cached.rows;
-    sections.push({ start: docHeight, rows, actions: cached.actions });
-    blockRows.push({ id: block.id, top: docHeight, height: rows.length });
-    docHeight += rows.length;
+    const selected = view.selected === block.id;
+    sections.push({ start: docHeight, rows: cached.rows, actions: cached.actions, selected });
+    blockRows.push({ id: block.id, top: docHeight, height: cached.rows.length });
+    docHeight += cached.rows.length;
   }
 
   let headerAt = -1;
@@ -404,7 +406,11 @@ export function composeBlocks(
   };
 
   for (const section of sections) {
-    take(section.start, section.start + section.rows.length, offset => section.rows[offset]);
+    take(section.start, section.start + section.rows.length, offset => {
+      const row = section.rows[offset];
+      if (row === undefined || !section.selected) return row;
+      return highlightRow(row, offset, section.rows.length - 1);
+    });
   }
   if (liveHeader !== null) take(headerAt, headerAt + 1, () => liveHeader!);
   if (liveStart !== null) {

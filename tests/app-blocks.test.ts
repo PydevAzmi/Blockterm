@@ -133,6 +133,8 @@ function startApp(o: {
   load?: () => LoadResult;
   model?: (config: Config, sessionId?: string) => ModelResult;
   copy?: (text: string) => void;
+  cols?: number;
+  rows?: number;
 } = {}): {
   run: Promise<number>;
   pty: FakePty;
@@ -141,7 +143,7 @@ function startApp(o: {
 } {
   const pty = new FakePty();
   const stdin = new FakeStdin();
-  const stdout = new FakeStdout(80, 24);
+  const stdout = new FakeStdout(o.cols ?? 80, o.rows ?? 24);
   const run = runApp({
     shell: { file: 'fake-shell', args: [] },
     stdin: stdin as unknown as NodeJS.ReadStream,
@@ -600,6 +602,77 @@ test('selecting an older block scrolls it into view', async () => {
   await expect(run).resolves.toBe(0);
 });
 
+test('revealing a block taller than the viewport settles in one scroll', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(runBlock('tall', lines(40)));
+  await until(() => output(stdout).includes('L40'));
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+
+  await wait(120);
+  const writes = stdout.writes.length;
+  const screen = output(stdout);
+  await wait(150);
+
+  expect(stdout.writes.length).toBe(writes);
+  expect(output(stdout)).toBe(screen);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('manual scrolling after a reveal is not undone by later renders', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(runBlock('first', lines(12)));
+  pty.emit(runBlock('tall', lines(40)));
+  pty.emit(runBlock('newest', 'x'));
+  await until(() => output(stdout).includes('┌ $ newest'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  await wait(120);
+  expect(output(stdout)).not.toContain('┌ $ first');
+
+  stdin.emit('data', '\x1b[5~');
+  await wait(100);
+  expect(output(stdout)).toContain('┌ $ first');
+  const pageWrites = stdout.writes.length;
+  const afterPage = output(stdout);
+  await wait(150);
+  expect(stdout.writes.length).toBe(pageWrites);
+  expect(output(stdout)).toBe(afterPage);
+
+  stdin.emit('data', '\x1b[F');
+  await wait(100);
+  expect(output(stdout)).toContain('┌ $ newest');
+
+  const beforeWheel = output(stdout);
+  stdin.emit('data', '\x1b[<64;5;5M');
+  await wait(100);
+  expect(output(stdout)).not.toBe(beforeWheel);
+  const wheelWrites = stdout.writes.length;
+  const afterWheel = output(stdout);
+  await wait(150);
+  expect(stdout.writes.length).toBe(wheelWrites);
+  expect(output(stdout)).toBe(afterWheel);
+
+  stdin.emit('data', '\x1b[H');
+  await wait(100);
+  expect(output(stdout)).toContain('┌ $ first');
+  const homeWrites = stdout.writes.length;
+  const afterHome = output(stdout);
+  await wait(150);
+  expect(stdout.writes.length).toBe(homeWrites);
+  expect(output(stdout)).toBe(afterHome);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+
 test('c copies the command and o copies the output', async () => {
   const copied: string[] = [];
   const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
@@ -640,7 +713,30 @@ test('e explains the selected failed block', async () => {
   await expect(run).resolves.toBe(0);
 });
 
+test('e on a successful block shows nothing to explain for two seconds', async () => {
+  const model = new MockLanguageModelV4({ doGenerate: async () => reply('nope') });
+  const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  stdin.emit('data', 'e');
+  await until(() => output(stdout).includes('nothing to explain'));
+  await wait(1000);
+  expect(output(stdout)).toContain('nothing to explain');
+  expect(model.doGenerateCalls).toHaveLength(0);
+
+  await wait(1200);
+  expect(output(stdout)).not.toContain('nothing to explain');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
 test('r reruns the selected command and exits selection', async () => {
+
   const { run, pty, stdin, stdout } = startApp();
 
   pty.emit(cycle('a'));
@@ -764,10 +860,13 @@ test('selection clears when the block cap drops the selected block', async () =>
   for (let i = 0; i < 200; i += 1) burst += runBlock(`cmd${i}`, 'x');
   pty.emit(burst);
   await until(() => !output(stdout).includes('c copy'), 10000);
+  await until(() => output(stdout).includes('F1 help'), 2000);
+  expect(output(stdout)).toContain('F1 help');
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);
 });
+
 
 test('selection survives new blocks arriving', async () => {
   const { run, pty, stdin, stdout } = startApp();
@@ -785,7 +884,23 @@ test('selection survives new blocks arriving', async () => {
   await expect(run).resolves.toBe(0);
 });
 
+test('ctrl+down with nothing selected passes through to the pty', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', '\x1b[1;5B');
+  await until(() => pty.written.length > 0);
+  expect(pty.written).toEqual(['\x1b[1;5B']);
+  expect(output(stdout)).not.toContain('c copy');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
 test('clicking a block row selects it', async () => {
+
   const { run, pty, stdin, stdout } = startApp();
 
   pty.emit(failedCycle('Error: boom'));
@@ -797,6 +912,50 @@ test('clicking a block row selects it', async () => {
   stdin.emit('data', `\x1b[<0;10;${row + 1}M`);
   stdin.emit('data', `\x1b[<0;10;${row + 1}m`);
   await until(() => output(stdout).includes('c copy'));
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('clicking a block row does not select while # input is open', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+  stdin.emit('data', '#');
+  await until(() => output(stdout).includes('# '));
+
+  const rows = renderScreen(stdout);
+  const row = rows.findIndex(line => line.includes('┌ $ ls'));
+  stdin.emit('data', `\x1b[<0;10;${row + 1}M`);
+  stdin.emit('data', `\x1b[<0;10;${row + 1}m`);
+  await wait(80);
+
+  expect(output(stdout)).not.toContain('c copy');
+  expect(output(stdout)).toContain('# ');
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('clicking a block row does not select while the panel has focus', async () => {
+  const { run, pty, stdin, stdout } = startApp({ cols: 160, rows: 24 });
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+
+  const rows = renderScreen(stdout);
+  const row = rows.findIndex(line => line.includes('┌ $ ls'));
+  stdin.emit('data', `\x1b[<0;10;${row + 1}M`);
+  stdin.emit('data', `\x1b[<0;10;${row + 1}m`);
+  await wait(80);
+
+  expect(output(stdout)).not.toContain('c copy');
   expect(pty.written).toEqual([]);
 
   pty.exit(0);
