@@ -124,13 +124,19 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
     }
   };
 
-  const handleKeys = async (keys: string): Promise<SendResult | 'abort'> => {
+  // guard runs again right before each write: the prompt can change while the card is open.
+  const handleKeys = async (
+    keys: string,
+    guard: () => SendResult | null = () => null,
+  ): Promise<SendResult | 'abort'> => {
     if (o.signal.aborted) return 'abort';
     const parsed = parseKeys(keys);
     if (!parsed.ok) return { status: 'error', message: parsed.message };
 
     if (allowRest) {
       if (o.signal.aborted) return 'abort';
+      const blocked = guard();
+      if (blocked !== null) return blocked;
       const bytes = keysToBytes(parsed.tokens, o.ctx.appCursor());
       o.ctx.session.write(bytes);
       emit({ type: 'sent', keys, auto: true });
@@ -144,6 +150,8 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
     const chosen = parseKeys(decision.keys);
     if (!chosen.ok) return { status: 'error', message: chosen.message };
     if (o.signal.aborted) return 'abort';
+    const blocked = guard();
+    if (blocked !== null) return blocked;
     if (decision.allowRest) allowRest = true;
 
     const bytes = keysToBytes(chosen.tokens, o.ctx.appCursor());
@@ -159,18 +167,23 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
     if (o.signal.aborted) return 'abort';
 
     if (toolName === 'run_command') {
-      const blocks = o.ctx.blocks;
-      if (blocks === null) {
-        return { status: 'error', message: 'blocks need shell integration' };
-      }
-      if (!blocks.isIdlePrompt()) {
-        return { status: 'error', message: 'not at an idle prompt — use send_keys' };
-      }
+      // ponytail: echo of an earlier write in the same step may not be parsed yet, so an
+      // auto-approved run_command right after send_keys can still see a stale idle prompt.
+      const notIdle = (): SendResult | null => {
+        const blocks = o.ctx.blocks;
+        if (blocks === null) return { status: 'error', message: 'blocks need shell integration' };
+        if (!blocks.isIdlePrompt()) {
+          return { status: 'error', message: 'not at an idle prompt — use send_keys' };
+        }
+        return null;
+      };
+      const blocked = notIdle();
+      if (blocked !== null) return blocked;
       const command =
         typeof rawInput === 'object' && rawInput !== null && 'command' in rawInput
           ? String((rawInput as { command: unknown }).command)
           : '';
-      return handleKeys(command.replaceAll('<', '<lt>') + '<Enter>');
+      return handleKeys(command.replaceAll('<', '<lt>') + '<Enter>', notIdle);
     }
 
     const keys =

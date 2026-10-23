@@ -985,6 +985,43 @@ test('run_command sends a literal < as <lt>', async () => {
   expect(pty.written.at(-1)).toBe('a<b\r');
 });
 
+test('run_command writes nothing if the prompt stops being idle while the card is open', async () => {
+  const { pty, session, store, events } = blocksHarness();
+  pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07');
+  await until(() => store.isIdlePrompt());
+
+  let n = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      return n === 1 ? callStream('c1', 'run_command', { command: 'ls' }) : textStream('ok');
+    },
+  });
+
+  const history = await runTask({
+    model,
+    system: 'sys',
+    history: [],
+    prompt: 'go',
+    ctx: { session, appCursor: () => false, blocks: store },
+    target: () => 'shell',
+    approve: async keys => {
+      pty.emit('x');
+      await until(() => !store.isIdlePrompt());
+      return { kind: 'approve', keys, allowRest: false };
+    },
+    onEvent: e => events.push(e),
+    signal: new AbortController().signal,
+    secrets: [],
+  });
+
+  expect(pty.written).toEqual([]);
+  expect(toolResultValue(history, 'c1')).toEqual({
+    status: 'error',
+    message: 'not at an idle prompt — use send_keys',
+  });
+});
+
 test('run_command away from an idle prompt fails without approval or writing', async () => {
   const { pty, session, store, events } = blocksHarness();
   pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07');
