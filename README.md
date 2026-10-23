@@ -37,6 +37,28 @@ At an empty prompt, type `#`, write what you want in plain words, and press `Ent
 
 A failed command's block ends with `[Explain error]`. Click it, or select the block and press `e`, to open the agent panel with an explanation of what went wrong.
 
+## Install
+
+Install Node 24 with fnm, nvm or the official installer.
+
+```sh
+npm i -g blockterm
+```
+
+The npm package is available after the first release; until then, build from source below.
+
+Node 24's npm blocks dependency install scripts by default. Windows and macOS use node-pty's
+prebuilds; on Linux, allow its build:
+
+```sh
+npm i -g --allow-scripts=node-pty blockterm
+```
+
+The Linux build needs `python3`, `make` and `g++`.
+
+`blockterm update` runs `npm install -g blockterm@latest` for an npm install, and pulls and
+rebuilds a source clone.
+
 ## Build from source
 
 ```sh
@@ -55,7 +77,7 @@ Update the clone and rebuild with one command:
 blockterm update
 ```
 
-It runs `git pull --ff-only`, then `npm install` and `npm run build`. An install from `npm i -g blockterm` updates the global package instead. Restart any open blockterm windows afterwards.
+It runs `git pull --ff-only`, then `npm install` and `npm run build`. An install from `npm i -g blockterm` updates the global package instead (`npm install -g --allow-scripts=node-pty blockterm@latest`). Restart any open blockterm windows afterwards.
 
 ## Set up the agent
 

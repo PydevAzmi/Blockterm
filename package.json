@@ -1,6 +1,7 @@
 {
   "name": "blockterm",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "An open-source terminal with command blocks and an AI agent that types only what you approve.",
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -8,13 +9,30 @@
   "bin": {
     "blockterm": "dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
+  "homepage": "https://blockterm.mohamedazmi.dev",
+  "bugs": {
+    "url": "https://github.com/pydevazmi/blockterm/issues"
+  },
+  "keywords": [
+    "terminal",
+    "shell",
+    "agent",
+    "ai",
+    "blocks",
+    "pty"
+  ],
   "license": "MIT",
   "repository": "github:pydevazmi/blockterm",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepack": "npm run clean && npm run build"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.82",

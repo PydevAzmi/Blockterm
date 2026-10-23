@@ -35,7 +35,7 @@ test('updateSteps for a git clone pulls, installs and builds', () => {
 
 test('updateSteps for an npm install updates the global package', () => {
   expect(updateSteps({ kind: 'npm' })).toEqual([
-    { cmd: NPM, args: ['install', '-g', 'blockterm@latest'] },
+    { cmd: NPM, args: ['install', '-g', '--allow-scripts=node-pty', 'blockterm@latest'] },
   ] satisfies Step[]);
 });
 
