@@ -82,11 +82,16 @@ export function trackModes(
 }
 
 // ponytail: RIS/DECSTR resets not tracked
-export function hostModesFrom(mirror: Terminal, t: TrackedModes): HostModes {
+export function hostModesFrom(
+  mirror: Terminal,
+  t: TrackedModes,
+  wantWheel = false,
+): HostModes {
+  const inner = mirror.modes.mouseTrackingMode;
   return {
     appCursor: mirror.modes.applicationCursorKeysMode,
     appKeypad: mirror.modes.applicationKeypadMode,
-    mouse: mirror.modes.mouseTrackingMode,
+    mouse: wantWheel && inner === 'none' ? 'vt200' : inner,
     cursorStyle: t.cursorStyle,
   };
 }

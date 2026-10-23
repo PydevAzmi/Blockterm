@@ -15,6 +15,7 @@ export interface Frame {
   rows: number;
   cells: Cell[];
   cursor: { row: number; col: number; visible: boolean };
+  blocksDocHeight?: number;
 }
 
 export interface Chrome {
@@ -176,5 +177,5 @@ export function composeFrame(
     }
   }
 
-  return { cols, rows, cells, cursor };
+  return { cols, rows, cells, cursor, blocksDocHeight: blocks?.docHeight };
 }

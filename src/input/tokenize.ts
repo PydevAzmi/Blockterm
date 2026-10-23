@@ -13,6 +13,7 @@ export type InputEvent =
   | MouseInput
   | { type: 'paste'; text: string }
   | { type: 'focus'; focused: boolean }
+  | { type: 'page-key'; direction: 'up' | 'down'; data: string }
   | { type: 'agent-key' }
   | { type: 'help-key' };
 
@@ -20,6 +21,10 @@ const ESC = '\x1b';
 const AGENT_KEY = '\x0b';
 const PASTE_START = `${ESC}[200~`;
 const PASTE_END = `${ESC}[201~`;
+const PAGE_KEYS = [
+  { data: `${ESC}[5;2~`, direction: 'up' as const },
+  { data: `${ESC}[6;2~`, direction: 'down' as const },
+];
 
 type Parsed =
   | { kind: 'hold' }
@@ -53,6 +58,17 @@ function classifyEscape(s: string, i: number): Parsed {
 
   if (c1 !== '[') return { kind: 'none' };
   if (rest.length === 2) return { kind: 'hold' };
+
+  for (const key of PAGE_KEYS) {
+    if (rest.startsWith(key.data)) {
+      return {
+        kind: 'event',
+        length: key.data.length,
+        event: { type: 'page-key', direction: key.direction, data: key.data },
+      };
+    }
+    if (key.data.startsWith(rest)) return { kind: 'hold' };
+  }
 
   const first = rest[2];
 

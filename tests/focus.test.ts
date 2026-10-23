@@ -270,3 +270,14 @@ test('mouse events go to the pty with terminal focus', () => {
   const r = reduce(initialUi(), event);
   expect(r.actions).toEqual([{ type: 'to-pty', event }]);
 });
+
+test('page keys go to the pty with terminal focus', () => {
+  const event: InputEvent = { type: 'page-key', direction: 'up', data: '\x1b[5;2~' };
+  const r = reduce(initialUi(), event);
+  expect(r.actions).toEqual([{ type: 'to-pty', event }]);
+});
+
+test('page keys are dropped with panel focus', () => {
+  const r = reduce(panel(), { type: 'page-key', direction: 'down', data: '\x1b[6;2~' });
+  expect(r.actions).toEqual([]);
+});

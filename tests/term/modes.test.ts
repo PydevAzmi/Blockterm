@@ -61,6 +61,16 @@ test('hostModesFrom reads the mirror modes', async () => {
   tracked.dispose();
 });
 
+test('hostModesFrom requests vt200 for the wheel when asked', async () => {
+  const term = new XtermTerminal({ allowProposedApi: true });
+  const tracked = trackModes(term);
+  expect(hostModesFrom(term, tracked.get(), true).mouse).toBe('vt200');
+
+  await write(term, '\x1b[?1003h');
+  expect(hostModesFrom(term, tracked.get(), true).mouse).toBe('any');
+  tracked.dispose();
+});
+
 test('hostModeDiff is empty for identical modes', () => {
   expect(hostModeDiff(DEFAULT_HOST_MODES, DEFAULT_HOST_MODES)).toBe('');
 });
