@@ -8,6 +8,13 @@ export interface BlocksView {
   store: BlockStore;
   scroll: number;
   hash?: { text: string; cursor: boolean } | null;
+  selected?: number | null;
+}
+
+export interface BlockRow {
+  id: number;
+  top: number;
+  height: number;
 }
 
 export interface BlockAction {
@@ -23,13 +30,24 @@ export interface BlocksResult {
   cursor: { row: number; col: number } | null;
   docHeight: number;
   actions: BlockAction[];
+  blockRows: BlockRow[];
 }
 
 const EXPLAIN_LABEL = '[Explain error]';
 const EXPLAIN_WIDTH = 15;
+const SELECTED_SGR = '1;36';
+const BORDER_CHARS = new Set(['┌', '┐', '└', '┘', '│', '─']);
 
 function blank(sgr = ''): Cell {
   return { ch: ' ', width: 1, sgr };
+}
+
+function highlighted(rows: Cell[][]): Cell[][] {
+  return rows.map(row =>
+    row.map(cell =>
+      BORDER_CHARS.has(cell.ch) ? { ...cell, sgr: SELECTED_SGR } : cell,
+    ),
+  );
 }
 
 function charWidth(ch: string): 1 | 2 {
@@ -298,12 +316,20 @@ export function composeBlocks(
   const buffer = mirror.buffer.active;
   const running = view.store.running;
 
-  const sections: { start: number; rows: Cell[][]; actions: BlockAction[] }[] = [];
+  const sections: {
+    start: number;
+    rows: Cell[][];
+    actions: BlockAction[];
+  }[] = [];
+  const blockRows: BlockRow[] = [];
   let docHeight = 0;
   for (const block of view.store.blocks) {
     const cached = cachedRows(block, cols, inner, area.rows, now);
-    sections.push({ start: docHeight, rows: cached.rows, actions: cached.actions });
-    docHeight += cached.rows.length;
+    const rows =
+      view.selected === block.id ? highlighted(cached.rows) : cached.rows;
+    sections.push({ start: docHeight, rows, actions: cached.actions });
+    blockRows.push({ id: block.id, top: docHeight, height: rows.length });
+    docHeight += rows.length;
   }
 
   let headerAt = -1;
@@ -404,5 +430,5 @@ export function composeBlocks(
     }
   }
 
-  return { rows, cursor, docHeight, actions };
+  return { rows, cursor, docHeight, actions, blockRows };
 }

@@ -10,6 +10,7 @@ import { createModel, keyHint, redact } from './agent/model.js';
 import type { ModelResult } from './agent/model.js';
 import { suggestCommand, explainError } from './agent/oneshot.js';
 import { buildSystemPrompt } from './agent/prompt.js';
+import { snapText } from './agent/tools.js';
 import type { ToolContext } from './agent/tools.js';
 import { BlockStore } from './blocks/store.js';
 import { configPath, loadConfig as readConfigFile } from './config.js';
@@ -31,6 +32,8 @@ import { gitBranch, headerText } from './render/header.js';
 import { drawPanel } from './render/panel.js';
 import type { CardView, Transcript } from './render/panel.js';
 import { createFrameScheduler, createRunningTicker } from './render/schedule.js';
+import { moveSelection, selectionKey } from './selection.js';
+import type { SelectionKey } from './selection.js';
 import type { ShellChoice } from './shell.js';
 import { inject } from './shellint/inject.js';
 import { hostModeDiff, hostModesFrom, trackModes } from './term/modes.js';
@@ -41,6 +44,7 @@ import type { TerminalSession } from './term/session.js';
 const CONFIG_HINT = 'Run `blockterm setup` to choose a model';
 const APPROVAL_QUIET_MS = 400;
 const APPROVE_KEYS = new Set(['y', 'a', 'e']);
+const SELECTION_HINT = 'c copy · o output · r rerun · e explain · Esc back';
 
 export function cardTokens(keys: string): { kind: 'text' | 'key'; label: string }[] {
   const parsed = parseKeys(keys);
@@ -59,8 +63,10 @@ export async function runApp(o: {
   ) => TerminalSession;
   loadConfig?: () => LoadResult;
   modelFactory?: (config: Config, sessionId?: string) => ModelResult;
+  copy?: (text: string) => void;
 }): Promise<number> {
   const { shell, stdin, stdout } = o;
+  const copy = o.copy ?? ((): void => {});
   globalThis.AI_SDK_LOG_WARNINGS = false;
   const load = o.loadConfig ?? ((): LoadResult =>
     readConfigFile(configPath(process.platform, process.env, homedir())));
@@ -128,6 +134,8 @@ export async function runApp(o: {
     let scroll = 0;
     let newOutput = false;
     let lastDocHeight = 0;
+    let selected: number | null = null;
+    let selectionNotice: string | null = null;
     let branch: string | null = null;
     let knownCwd: string | null = null;
     let lastBlockId = 0;
@@ -159,7 +167,15 @@ export async function runApp(o: {
       const trackedModes = tracked.get();
       const status = statusText();
       const footerStatus =
-        status !== '' ? status : scroll > 0 && newOutput ? '↓ new output' : '';
+        status !== ''
+          ? status
+          : selectionNotice !== null
+            ? selectionNotice
+            : selected !== null
+              ? SELECTION_HINT
+              : scroll > 0 && newOutput
+                ? '↓ new output'
+                : '';
       const frame = composeFrame(
         session.mirror,
         layout,
@@ -170,10 +186,10 @@ export async function runApp(o: {
             branch,
             model: modelLabel ?? null,
           }),
-          footer: FOOTER,
+          footer: selected !== null && status === '' ? '' : FOOTER,
           footerStatus,
           view: session.view,
-          blocks: { store, scroll, hash: hashView() },
+          blocks: { store, scroll, hash: hashView(), selected },
         },
         trackedModes.cursorVisible,
       );
@@ -186,6 +202,30 @@ export async function runApp(o: {
         if (scroll > max) scroll = max;
         if (scroll === 0) newOutput = false;
         if (scroll !== before) requestRender();
+      }
+      if (
+        selected !== null &&
+        frame.blockRows !== undefined &&
+        frame.blocksDocHeight !== undefined
+      ) {
+        const row = frame.blockRows.find(block => block.id === selected);
+        if (row !== undefined) {
+          const max = Math.max(0, frame.blocksDocHeight - layout.pty.rows);
+          const current = Math.min(Math.max(0, Math.floor(scroll)), max);
+          const viewStart = Math.max(0, frame.blocksDocHeight - layout.pty.rows - current);
+          const viewEnd = viewStart + layout.pty.rows;
+          let next = current;
+          if (row.top < viewStart) {
+            next = Math.min(max, frame.blocksDocHeight - layout.pty.rows - row.top);
+          } else if (row.top + row.height > viewEnd) {
+            next = frame.blocksDocHeight - row.top - row.height;
+          }
+          next = Math.max(0, Math.min(max, next));
+          if (next !== scroll) {
+            scroll = next;
+            requestRender();
+          }
+        }
       }
       const overlay = layout.panel.mode === 'overlay';
       const drawPanelNow =
@@ -301,12 +341,47 @@ export async function runApp(o: {
               explainBlock(hit.blockId);
               return;
             }
+            const frame = lastFrame;
+            if (frame?.blockRows !== undefined && frame.blocksDocHeight !== undefined) {
+              const max = Math.max(0, frame.blocksDocHeight - layout.pty.rows);
+              const current = Math.min(Math.max(0, scroll), max);
+              const start = Math.max(0, frame.blocksDocHeight - layout.pty.rows - current);
+              const docRow = start + y;
+              const block = frame.blockRows.find(
+                candidate => docRow >= candidate.top && docRow < candidate.top + candidate.height,
+              );
+              if (block !== undefined) {
+                selected = block.id;
+                selectionNotice = null;
+                requestRender();
+                return;
+              }
+            }
           }
           const wheel = event.button & ~(4 | 8 | 16);
           if (wheel === 64) scrollBy(3);
           else if (wheel === 65) scrollBy(-3);
           return;
         }
+      }
+
+      if (
+        event.type === 'bytes' &&
+        (event.data === '\x1b[1;5A' || event.data === '\x1b[1;5B') &&
+        session.view === 'blocks' &&
+        store.integrated &&
+        ui.focus === 'terminal' &&
+        hash === null &&
+        store.blocks.length > 0
+      ) {
+        selected = moveSelection(
+          store.blocks.map(block => block.id),
+          selected,
+          event.data === '\x1b[1;5A' ? 'prev' : 'next',
+        );
+        selectionNotice = null;
+        requestRender();
+        return;
       }
 
       if (
@@ -672,6 +747,86 @@ export async function runApp(o: {
       })();
     };
 
+    const selectionBlock = (): (typeof store.blocks)[number] | null => {
+      if (selected === null) return null;
+      return store.blocks.find(block => block.id === selected) ?? null;
+    };
+
+    const rerunSelected = (block: (typeof store.blocks)[number]): void => {
+      if (!store.isIdlePrompt()) {
+        selectionNotice = 'not at an idle prompt';
+        return;
+      }
+      if (block.command.includes('\n') || block.command.includes('\r')) {
+        if (!session.mirror.modes.bracketedPasteMode) {
+          selectionNotice = 'multi-line rerun needs bracketed paste';
+          return;
+        }
+        session.write(`\x1b[200~${block.command}\x1b[201~\r`);
+      } else {
+        session.write(`${block.command}\r`);
+      }
+      scroll = 0;
+      newOutput = false;
+      selected = null;
+      selectionNotice = null;
+      requestRender();
+    };
+
+    const handleSelectionKey = (key: SelectionKey): void => {
+      selectionNotice = null;
+      switch (key) {
+        case 'prev':
+        case 'next': {
+          selected = moveSelection(
+            store.blocks.map(block => block.id),
+            selected,
+            key,
+          );
+          break;
+        }
+        case 'copy-command':
+        case 'copy-output': {
+          const block = selectionBlock();
+          if (block !== null) {
+            copy(key === 'copy-command' ? block.command : snapText(block.lines).join('\n'));
+          }
+          break;
+        }
+        case 'rerun': {
+          const block = selectionBlock();
+          if (block !== null) rerunSelected(block);
+          break;
+        }
+        case 'explain': {
+          const block = selectionBlock();
+          if (block !== null && ui.mode !== 'busy' && taskController === null) {
+            explainBlock(block.id);
+            selected = null;
+          }
+          break;
+        }
+        case 'exit':
+          selected = null;
+          break;
+        case 'scroll-page-up':
+          scrollBy(layout.pty.rows - 1);
+          break;
+        case 'scroll-page-down':
+          scrollBy(-(layout.pty.rows - 1));
+          break;
+        case 'scroll-top':
+          scrollBy(lastDocHeight);
+          break;
+        case 'scroll-bottom':
+          scrollBy(-lastDocHeight);
+          break;
+        case null:
+          break;
+      }
+      requestRender();
+    };
+
     const runAction = (action: Action): void => {
       switch (action.type) {
         case 'to-pty':
@@ -774,6 +929,16 @@ export async function runApp(o: {
         requestRender();
         return;
       }
+      if (selected !== null && ui.focus === 'terminal') {
+        if (event.type === 'paste') {
+          requestRender();
+          return;
+        }
+        if (event.type === 'bytes') {
+          handleSelectionKey(selectionKey(event.data));
+          return;
+        }
+      }
       if (
         ui.card !== null &&
         (ui.card.editing || ui.card.denying) &&
@@ -817,10 +982,18 @@ export async function runApp(o: {
       const newest = store.blocks.at(-1)?.id ?? lastBlockId;
       if (newest !== lastBlockId) syncBranch();
       lastBlockId = newest;
+      if (selected !== null && !store.blocks.some(block => block.id === selected)) {
+        selected = null;
+        selectionNotice = null;
+      }
       if (scroll > 0) newOutput = true;
       requestRender();
     });
     const parsed = session.onParsed(() => {
+      if (selected !== null && session.view !== 'blocks') {
+        selected = null;
+        selectionNotice = null;
+      }
       if (scroll > 0) newOutput = true;
       requestRender();
     });

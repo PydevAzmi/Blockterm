@@ -187,6 +187,40 @@ test('a label scrolled out of view has no action', async () => {
   expect(result.actions).toEqual([]);
 });
 
+test('the selected block borders are bold cyan and the rows are not cached', async () => {
+  const { mirror, store } = await finishedBlock({
+    command: 'ls',
+    body: 'a\r\nb',
+    after: '\x1b]133;A\x07$ ',
+  });
+  const id = store.blocks[0]!.id;
+  const view = { store, scroll: 0, selected: id };
+  const selected = composeBlocks(mirror, view, { cols: 40, rows: 12 }, 5000);
+
+  expect(selected.rows[0]![0]!.sgr).toBe('1;36');
+  expect(selected.rows[0]![39]!.sgr).toBe('1;36');
+  expect(selected.rows[1]![0]!.sgr).toBe('1;36');
+  expect(selected.rows[1]![39]!.sgr).toBe('1;36');
+  expect(selected.rows[1]![1]!.sgr).toBe('');
+  expect(selected.rows[3]![0]!.sgr).toBe('1;36');
+
+  const plain = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
+  expect(plain.rows[0]![0]!.sgr).toBe('');
+  expect(plain.rows[1]![0]!.sgr).toBe('');
+  expect(find(plain.rows[0]!, '✔').sgr).toBe('32');
+});
+
+test('blockRows reports each block top and height in document rows', async () => {
+  const { mirror, store } = await finishedBlock({
+    command: 'ls',
+    body: 'a\r\nb',
+    after: '\x1b]133;A\x07$ ',
+  });
+  const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
+
+  expect(result.blockRows).toEqual([{ id: store.blocks[0]!.id, top: 0, height: 4 }]);
+});
+
 test('the label is omitted when the inner width is under 17', async () => {
   const { mirror, store } = await finishedBlock({
     command: 'npm test',
