@@ -61,3 +61,10 @@ test('keys other than escape are ignored while busy or showing an error', () => 
     expect(reduceHash(failed, event)).toEqual({ state: failed, action: null });
   }
 });
+
+test('control characters are stripped from typed and pasted input', () => {
+  expect(reduceHash(editing('a'), bytes('\x01b\x9b')).state).toEqual(editing('ab'));
+  expect(
+    reduceHash(editing('echo '), { type: 'paste', text: 'x\x00\t\x7f\x9b\r\n' }).state,
+  ).toEqual(editing('echo x  '));
+});

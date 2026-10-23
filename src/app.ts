@@ -8,7 +8,7 @@ import { runTask } from './agent/loop.js';
 import type { AgentEvent, Decision } from './agent/loop.js';
 import { createModel, keyHint, redact } from './agent/model.js';
 import type { ModelResult } from './agent/model.js';
-import { suggestCommand } from './agent/oneshot.js';
+import { suggestCommand, explainError } from './agent/oneshot.js';
 import { buildSystemPrompt } from './agent/prompt.js';
 import type { ToolContext } from './agent/tools.js';
 import { BlockStore } from './blocks/store.js';
@@ -16,7 +16,7 @@ import { configPath, loadConfig as readConfigFile } from './config.js';
 import type { Config, LoadResult } from './config.js';
 import { initialUi, reduce } from './focus.js';
 import type { Action } from './focus.js';
-import { reduceHash } from './hash.js';
+import { reduceHash, stripControl } from './hash.js';
 import type { HashState } from './hash.js';
 import { ENTER_HOST, installRestore } from './host.js';
 import type { InputEvent } from './input/tokenize.js';
@@ -150,7 +150,7 @@ export async function runApp(o: {
       if (hash === null) return null;
       if (hash.status === 'editing') return { text: `# ${hash.input}`, cursor: true };
       if (hash.status === 'busy') return { text: `# ${hash.input}  …`, cursor: false };
-      return { text: `# ${hash.input}  ${hash.status.error}`, cursor: false };
+      return { text: `# ${hash.input}  ${stripControl(hash.status.error)}`, cursor: false };
     };
 
     const render = (): void => {
@@ -290,6 +290,18 @@ export async function runApp(o: {
         const y = event.row - layout.origin.row;
         const inPty = x >= 0 && x < layout.pty.cols && y >= 0 && y < layout.pty.rows;
         if (!overPanel && inPty) {
+          if (event.action === 'press' && event.button === 0) {
+            const hit = lastFrame?.blockActions?.find(
+              action =>
+                event.row === action.row &&
+                event.col >= action.col &&
+                event.col < action.col + action.width,
+            );
+            if (hit !== undefined) {
+              explainBlock(hit.blockId);
+              return;
+            }
+          }
           const wheel = event.button & ~(4 | 8 | 16);
           if (wheel === 64) scrollBy(3);
           else if (wheel === 65) scrollBy(-3);
@@ -586,6 +598,80 @@ export async function runApp(o: {
       }
     };
 
+    const explainBlock = (blockId: number): void => {
+      if (ui.mode === 'busy' || taskController !== null) return;
+      const block = store.blocks.find(candidate => candidate.id === blockId);
+      if (block === undefined) return;
+
+      if (!ui.open) {
+        ui = { ...ui, open: true, focus: 'panel' };
+        applyLayout();
+      } else {
+        ui = { ...ui, focus: 'panel' };
+      }
+      transcript.push({
+        who: 'note',
+        text: `Explain error: $ ${block.command} (exit ${block.exitCode ?? '?'})`,
+      });
+      agentOpen = false;
+
+      const ensured = ensureModel();
+      if (!ensured.ok) {
+        if (config === null) {
+          configNoticeShown = true;
+          transcript.push({ who: 'note', text: CONFIG_HINT });
+        } else {
+          transcript.push({ who: 'error', text: ensured.error });
+          if (ensured.missingKeyEnv !== undefined) {
+            for (const line of keyHint(process.platform, ensured.missingKeyEnv)) {
+              transcript.push({ who: 'note', text: line });
+            }
+          }
+        }
+        ui = { ...ui, mode: 'idle' };
+        requestRender();
+        return;
+      }
+
+      const controller = new AbortController();
+      taskController = controller;
+      const key =
+        config === null || config.apiKeyEnv === ''
+          ? ''
+          : (process.env[config.apiKeyEnv] ?? '');
+      ui = { ...ui, mode: 'busy', card: null };
+      requestRender();
+
+      void (async (): Promise<void> => {
+        try {
+          const text = await explainError({
+            model: ensured.model,
+            ctx: { os: process.platform, shell: shell.file, folder: store.cwd },
+            block,
+            signal: controller.signal,
+          });
+          if (stopped) return;
+          transcript.push({ who: 'agent', text });
+        } catch (error) {
+          if (stopped) return;
+          if (controller.signal.aborted) {
+            transcript.push({ who: 'note', text: 'cancelled' });
+          } else {
+            transcript.push({
+              who: 'error',
+              text: redact(error instanceof Error ? error.message : String(error), key === '' ? [] : [key]),
+            });
+          }
+        } finally {
+          if (taskController === controller) taskController = null;
+          if (!stopped) {
+            ui = { ...ui, mode: 'idle' };
+            requestRender();
+          }
+        }
+      })();
+    };
+
     const runAction = (action: Action): void => {
       switch (action.type) {
         case 'to-pty':
@@ -663,6 +749,15 @@ export async function runApp(o: {
         return;
       }
       lastKeyAt = now;
+      if (
+        hash !== null &&
+        (session.view !== 'blocks' || (hash.status === 'editing' && !store.isIdlePrompt()))
+      ) {
+        hashController?.abort();
+        hashController = null;
+        hash = null;
+        requestRender();
+      }
       if (
         hash !== null &&
         ui.focus === 'terminal' &&

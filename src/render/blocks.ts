@@ -10,11 +10,23 @@ export interface BlocksView {
   hash?: { text: string; cursor: boolean } | null;
 }
 
+export interface BlockAction {
+  row: number;
+  col: number;
+  width: number;
+  blockId: number;
+  kind: 'explain';
+}
+
 export interface BlocksResult {
   rows: Cell[][];
   cursor: { row: number; col: number } | null;
   docHeight: number;
+  actions: BlockAction[];
 }
+
+const EXPLAIN_LABEL = '[Explain error]';
+const EXPLAIN_WIDTH = 15;
 
 function blank(sgr = ''): Cell {
   return { ch: ' ', width: 1, sgr };
@@ -112,10 +124,15 @@ function topBorder(block: Block, cols: number, now: number): Cell[] {
   return fitRow(row, cols);
 }
 
-function bottomBorder(cols: number): Cell[] {
+function bottomBorder(block: Block, cols: number, inner: number): Cell[] {
   const row: Cell[] = [];
-  pushText(row, '└');
-  pushText(row, '─'.repeat(Math.max(0, cols - 2)));
+  if (block.exitCode !== 0 && inner >= EXPLAIN_WIDTH + 2) {
+    pushText(row, `└ ${EXPLAIN_LABEL} `);
+    pushText(row, '─'.repeat(Math.max(0, cols - row.length - 1)));
+  } else {
+    pushText(row, '└');
+    pushText(row, '─'.repeat(Math.max(0, cols - 2)));
+  }
   pushText(row, '┘');
   return fitRow(row, cols);
 }
@@ -228,6 +245,7 @@ interface CachedBlock {
   inner: number;
   areaRows: number;
   rows: Cell[][];
+  actions: BlockAction[];
 }
 
 const blockCache = new WeakMap<Block, CachedBlock>();
@@ -243,17 +261,30 @@ function cachedRows(
   inner: number,
   areaRows: number,
   now: number,
-): Cell[][] {
+): CachedBlock {
   const hit = blockCache.get(block);
-  if (hit !== undefined && hit.inner === inner && hit.areaRows === areaRows) return hit.rows;
+  if (hit !== undefined && hit.inner === inner && hit.areaRows === areaRows) return hit;
 
   const rows = [
     topBorder(block, cols, block.endedAt ?? now),
     ...cappedBody(block, cols, inner, areaRows),
-    bottomBorder(cols),
+    bottomBorder(block, cols, inner),
   ];
-  if (block.endedAt !== null) blockCache.set(block, { inner, areaRows, rows });
-  return rows;
+  const actions: BlockAction[] =
+    block.exitCode !== 0 && inner >= EXPLAIN_WIDTH + 2
+      ? [
+          {
+            row: rows.length - 1,
+            col: 2,
+            width: EXPLAIN_WIDTH,
+            blockId: block.id,
+            kind: 'explain',
+          },
+        ]
+      : [];
+  const cached = { inner, areaRows, rows, actions };
+  if (block.endedAt !== null) blockCache.set(block, cached);
+  return cached;
 }
 
 export function composeBlocks(
@@ -267,12 +298,12 @@ export function composeBlocks(
   const buffer = mirror.buffer.active;
   const running = view.store.running;
 
-  const sections: { start: number; rows: Cell[][] }[] = [];
+  const sections: { start: number; rows: Cell[][]; actions: BlockAction[] }[] = [];
   let docHeight = 0;
   for (const block of view.store.blocks) {
-    const rows = cachedRows(block, cols, inner, area.rows, now);
-    sections.push({ start: docHeight, rows });
-    docHeight += rows.length;
+    const cached = cachedRows(block, cols, inner, area.rows, now);
+    sections.push({ start: docHeight, rows: cached.rows, actions: cached.actions });
+    docHeight += cached.rows.length;
   }
 
   let headerAt = -1;
@@ -363,5 +394,15 @@ export function composeBlocks(
       ? { row: cursorDoc.row - start, col: cursorDoc.col }
       : null;
 
-  return { rows, cursor, docHeight };
+  const actions: BlockAction[] = [];
+  for (const section of sections) {
+    for (const action of section.actions) {
+      const docRow = section.start + action.row;
+      if (docRow >= start && docRow < end) {
+        actions.push({ ...action, row: docRow - start });
+      }
+    }
+  }
+
+  return { rows, cursor, docHeight, actions };
 }

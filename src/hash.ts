@@ -15,6 +15,10 @@ function isPrintable(ch: string): boolean {
   return ch >= ' ' && ch !== DEL;
 }
 
+export function stripControl(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+}
+
 function deleteLast(text: string): string {
   const points = Array.from(text);
   points.pop();
@@ -37,7 +41,7 @@ function bytes(s: HashState, data: string): { state: HashState; action: HashActi
         action: { type: 'submit', request: input.trim() },
       };
     } else if (isPrintable(ch)) {
-      input += ch;
+      input += stripControl(ch);
     }
   }
   return { state: { ...s, input }, action: null };
@@ -53,7 +57,7 @@ export function reduceHash(
     case 'paste':
       if (s.status !== 'editing') return { state: s, action: null };
       return {
-        state: { ...s, input: s.input + e.text.replace(/[\r\n]/g, ' ') },
+        state: { ...s, input: s.input + stripControl(e.text.replace(/[\r\n]/g, ' ')) },
         action: null,
       };
     default:

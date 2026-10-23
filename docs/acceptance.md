@@ -79,6 +79,20 @@ Owner checks for the blocks view. Run these by hand in a real terminal.
 - [ ] **vim and less** still go full screen and return to blocks.
 - [ ] **Repeated command and leading-space command** (`HISTCONTROL=ignoreboth`) still finish blocks.
 
+## Slice 6: # and explain
+
+Owner checks for `#` suggestions and Explain error. Run these by hand in a real terminal with a real
+model.
+
+- [ ] **`#` in bash, zsh and pwsh.** At an empty prompt, type `#`, write a request, press `Enter`, and
+  check the suggested command is typed into the prompt without running.
+- [ ] **Esc mid-request.** Press `Esc` while the `#` request is pending; nothing is typed and the
+  input closes.
+- [ ] **A model that can't call tools still works for `#`.** Use a provider or model without tool
+  support; `#` still returns one command.
+- [ ] **Explain error on a failing `npm test`.** Run `npm test` until it fails, click
+  `[Explain error]` on the block, and check the panel shows an explanation.
+
 ## Agent (slices 3–5)
 
 Owner checks for the agent panel, the approval card and the write tools. Run these with a real

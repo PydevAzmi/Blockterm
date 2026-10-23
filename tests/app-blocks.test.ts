@@ -3,13 +3,29 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test } from 'vitest';
+import { MockLanguageModelV4 } from 'ai/test';
 
 import type { Config, LoadResult } from '../src/config.js';
+import type { ModelResult } from '../src/agent/model.js';
 import { runApp } from '../src/app.js';
 import { TerminalSession } from '../src/term/session.js';
 import { FakePty } from './helpers/fake-pty.js';
 
 process.setMaxListeners(0);
+
+const USAGE = {
+  inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+  outputTokens: { total: 1, text: 1, reasoning: undefined },
+};
+
+function reply(text: string) {
+  return {
+    content: [{ type: 'text' as const, text }],
+    finishReason: { unified: 'stop' as const, raw: undefined },
+    usage: USAGE,
+    warnings: [],
+  };
+}
 
 const CONFIG: Config = {
   provider: '@ai-sdk/anthropic',
@@ -113,7 +129,10 @@ async function until(fn: () => boolean, ms = 3000): Promise<void> {
   }
 }
 
-function startApp(): { run: Promise<number>; pty: FakePty; stdin: FakeStdin; stdout: FakeStdout } {
+function startApp(o: {
+  load?: () => LoadResult;
+  model?: (config: Config, sessionId?: string) => ModelResult;
+} = {}): { run: Promise<number>; pty: FakePty; stdin: FakeStdin; stdout: FakeStdout } {
   const pty = new FakePty();
   const stdin = new FakeStdin();
   const stdout = new FakeStdout(80, 24);
@@ -122,9 +141,35 @@ function startApp(): { run: Promise<number>; pty: FakePty; stdin: FakeStdin; std
     stdin: stdin as unknown as NodeJS.ReadStream,
     stdout: stdout as unknown as NodeJS.WriteStream,
     createSession: (_shell, size) => new TerminalSession(pty, size),
-    loadConfig: () => LOADED,
+    loadConfig: o.load ?? (() => LOADED),
+    ...(o.model !== undefined ? { modelFactory: o.model } : {}),
   });
   return { run, pty, stdin, stdout };
+}
+
+function okModel(model: MockLanguageModelV4): (config: Config) => ModelResult {
+  return () => ({ ok: true, model, label: CONFIG.model });
+}
+
+function failedCycle(body = 'boom', command = 'npm test'): string {
+  const prompt = '\x1b]133;A\x07$ \x1b]133;B\x07';
+  return (
+    `${osc7(FOLDER)}${prompt}${command}\r\n` +
+    `\x1b]133;C\x07${body}\r\n\x1b]133;D;1\x07${prompt}`
+  );
+}
+
+function labelAt(stdout: FakeStdout): { row: number; col: number } {
+  const rows = renderScreen(stdout);
+  const row = rows.findIndex(line => line.includes('[Explain error]'));
+  if (row < 0) throw new Error('label not found');
+  return { row, col: rows[row]!.indexOf('[Explain error]') };
+}
+
+function clickLabel(stdin: FakeStdin, stdout: FakeStdout): void {
+  const { row, col } = labelAt(stdout);
+  stdin.emit('data', `\x1b[<0;${col + 1};${row + 1}M`);
+  stdin.emit('data', `\x1b[<0;${col + 1};${row + 1}m`);
 }
 
 function osc7(path: string): string {
@@ -347,6 +392,156 @@ test('ctrl+l in the fullscreen view goes to the pty', async () => {
 
   stdin.emit('data', '\x0c');
   await until(() => pty.written.map(String).join('').includes('\x0c'));
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('clicking [Explain error] opens the panel and explains the failed block', async () => {
+  let release: (value: unknown) => void = () => {};
+  const model = new MockLanguageModelV4({
+    doGenerate: () =>
+      new Promise(resolve => {
+        release = resolve;
+      }),
+  });
+  const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
+
+  pty.emit(failedCycle('Error: boom'));
+  await until(() => output(stdout).includes('[Explain error]'));
+  expect(output(stdout)).not.toContain('agent · claude-haiku-5-5');
+
+  clickLabel(stdin, stdout);
+  await until(() => model.doGenerateCalls.length === 1);
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  await until(() => output(stdout).includes('Explain error: $ npm test (exit 1)'));
+  expect(output(stdout)).toContain('agent busy');
+
+  const call = model.doGenerateCalls[0]!;
+  expect(call.tools ?? []).toEqual([]);
+  const prompt = JSON.stringify(call.prompt);
+  expect(prompt).toContain('Command: npm test');
+  expect(prompt).toContain('Exit code: 1');
+  expect(prompt).toContain('Error: boom');
+
+  release(reply('Cause: boom.\nFix: rerun tests'));
+  await until(() => output(stdout).includes('Cause: boom.'));
+  await until(() => !output(stdout).includes('agent busy'));
+  await wait(30);
+  expect(model.doGenerateCalls).toHaveLength(1);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('Esc in the panel cancels a running explanation', async () => {
+  const model = new MockLanguageModelV4({
+    doGenerate: options =>
+      new Promise((_, reject) => {
+        options.abortSignal?.addEventListener(
+          'abort',
+          () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          },
+          { once: true },
+        );
+      }),
+  });
+  const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
+
+  pty.emit(failedCycle('Error: boom'));
+  await until(() => output(stdout).includes('[Explain error]'));
+
+  clickLabel(stdin, stdout);
+  await until(() => model.doGenerateCalls.length === 1);
+  await until(() => output(stdout).includes('agent busy'));
+
+  stdin.emit('data', '\x1b');
+  await until(() => output(stdout).includes('cancelled'));
+  expect(output(stdout)).not.toContain('agent busy');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('clicking [Explain error] while an agent task is busy does nothing', async () => {
+  const model = new MockLanguageModelV4({
+    doStream: () => new Promise(() => {}),
+    doGenerate: async () => reply('should not happen'),
+  });
+  const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
+
+  pty.emit(failedCycle('Error: boom'));
+  await until(() => output(stdout).includes('[Explain error]'));
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('hello'));
+  await until(() => output(stdout).includes('agent busy'));
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('[Explain error]'));
+  clickLabel(stdin, stdout);
+  await wait(50);
+
+  expect(model.doGenerateCalls).toHaveLength(0);
+  expect(output(stdout)).toContain('agent busy');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('clicks elsewhere do nothing', async () => {
+  const model = new MockLanguageModelV4({ doGenerate: async () => reply('nope') });
+  const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
+
+  pty.emit(failedCycle('Error: boom'));
+  await until(() => output(stdout).includes('[Explain error]'));
+  const { row } = labelAt(stdout);
+
+  stdin.emit('data', `\x1b[<0;40;${row + 1}M`);
+  await wait(50);
+
+  expect(model.doGenerateCalls).toHaveLength(0);
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('the explain click goes to the pty when the inner program asked for mouse', async () => {
+  const model = new MockLanguageModelV4({ doGenerate: async () => reply('nope') });
+  const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
+
+  pty.emit(failedCycle('Error: boom'));
+  await until(() => output(stdout).includes('[Explain error]'));
+  pty.emit('\x1b[?1000h\x1b[?1006h');
+  await wait(30);
+
+  clickLabel(stdin, stdout);
+  await until(() => pty.written.map(String).join('').includes('\x1b[<0;'));
+  expect(model.doGenerateCalls).toHaveLength(0);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('without config Explain error shows the hint and never calls the model', async () => {
+  const model = new MockLanguageModelV4({ doGenerate: async () => reply('nope') });
+  const { run, pty, stdin, stdout } = startApp({
+    load: () => ({ ok: false, reason: 'missing', message: 'no config' }),
+    model: okModel(model),
+  });
+
+  pty.emit(failedCycle('Error: boom'));
+  await until(() => output(stdout).includes('[Explain error]'));
+
+  clickLabel(stdin, stdout);
+  await until(() => output(stdout).includes('Run `blockterm setup` to choose a model'));
+  expect(model.doGenerateCalls).toHaveLength(0);
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);

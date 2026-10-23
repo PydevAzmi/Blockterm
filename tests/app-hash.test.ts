@@ -377,3 +377,68 @@ test('ctrl+k moves focus to the panel and back with the hash input kept', async 
   app.pty.exit(0);
   await expect(app.run).resolves.toBe(0);
 });
+
+test('a missing key shows Set <ENV> in the hash line', async () => {
+  const app = startApp({
+    load: () => LOADED,
+    model: () => ({ ok: false, missingKeyEnv: 'ANTHROPIC_API_KEY' }),
+  });
+
+  await openHash(app);
+  app.stdin.emit('data', 'list');
+  app.stdin.emit('data', '\r');
+  await until(() => output(app.stdout).includes('Set ANTHROPIC_API_KEY'));
+  expect(output(app.stdout)).toContain('# list');
+
+  app.pty.exit(0);
+  await expect(app.run).resolves.toBe(0);
+});
+
+test('an error in the hash line is stripped of control characters', async () => {
+  const model = new MockLanguageModelV4({
+    doGenerate: async () => {
+      throw new Error('boom \x1b[31mred\x9b');
+    },
+  });
+  const app = startApp({ load: () => LOADED, model: okModel(model) });
+
+  await openHash(app);
+  app.stdin.emit('data', 'list');
+  app.stdin.emit('data', '\r');
+  await until(() => output(app.stdout).includes('boom'));
+  expect(output(app.stdout)).toContain('boom [31mred');
+
+  app.pty.exit(0);
+  await expect(app.run).resolves.toBe(0);
+});
+
+test('hash in the full-screen view is written to the pty', async () => {
+  const app = startApp({ load: () => LOADED });
+
+  app.pty.emit('\x1b[?1049h');
+  await wait(30);
+  app.stdin.emit('data', '#');
+  await until(() => app.pty.written.length > 0);
+  expect(app.pty.written.map(String).join('')).toBe('#');
+
+  app.pty.exit(0);
+  await expect(app.run).resolves.toBe(0);
+});
+
+test('a stale hash input does not swallow keys after the view changes', async () => {
+  const app = startApp({ load: () => LOADED });
+
+  await openHash(app);
+  app.stdin.emit('data', '\x0b');
+  await until(() => output(app.stdout).includes('agent · claude-haiku-5-5'));
+  app.pty.emit('\x1b[?1049h');
+  await wait(30);
+  app.stdin.emit('data', '\x0b');
+  await wait(30);
+
+  app.stdin.emit('data', '\x03');
+  await until(() => app.pty.written.map(String).join('').includes('\x03'));
+
+  app.pty.exit(0);
+  await expect(app.run).resolves.toBe(0);
+});
