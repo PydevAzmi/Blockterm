@@ -3,6 +3,10 @@ an open-source terminal named Blockterm. It wraps your real shell — ssh, vim, 
 
 Website: https://blockterm.mohamedazmi.dev
 
+[![Watch the 30-second blockterm film: the agent reads a remote ssh screen and types only what you approve](site/media/blockterm-launch.jpg)](https://blockterm.mohamedazmi.dev/#film)
+
+▶ [Watch the 30-second film](https://blockterm.mohamedazmi.dev/#film) ([MP4](site/media/blockterm-launch.mp4)). The host name and server output in it are illustrative.
+
 ## Blocks
 
 Each command's output becomes a block: a one-line header with the command, its exit status and how long it took, then the output. There is no frame around the window — the shell gets every column.
