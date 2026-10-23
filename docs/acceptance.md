@@ -107,6 +107,17 @@ by hand in a real terminal.
 - [ ] **F1 help.** Press `F1`, check the key list, close it with `F1` and with `Esc`, and confirm the
   next `Esc` reaches the shell.
 
+## Slice 8: release
+
+Owner checks for the published package. Run these on clean machines, not the development checkout.
+
+- [ ] **Global install on Windows.** `npm i -g <blockterm tarball from npm pack>` installs, then
+  `blockterm --version` prints `0.1.0`.
+- [ ] **Global install on macOS.** The same tarball install and version check.
+- [ ] **Global install on Linux.** The same tarball install with `--allow-scripts=node-pty` and
+  version check; node-pty compiles with `python3`, `make` and `g++`.
+- [ ] **`blockterm doctor` after `blockterm setup`** passes on each of those machines.
+
 ## Agent (slices 3–5)
 
 Owner checks for the agent panel, the approval card and the write tools. Run these with a real

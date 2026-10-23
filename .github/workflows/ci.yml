@@ -25,6 +25,40 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  pack-install:
+    needs: [test]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Pack and install globally from the tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarball=$(npm pack --silent | tail -n 1)
+          test -f "$tarball"
+          echo "Packed $tarball"
+          cd "$RUNNER_TEMP"
+          # Node 24 npm blocks dependency install scripts by default; node-pty
+          # needs one on Linux, where it has no prebuild.
+          npm i -g --allow-scripts=node-pty "$GITHUB_WORKSPACE/$tarball"
+          installed_version=$(blockterm --version)
+          echo "blockterm --version: $installed_version"
+          test "$installed_version" = "0.1.0"
+          blockterm --help | head -n 1 | grep -q '^usage: blockterm'
+          package_root="$(npm root -g)/blockterm"
+          echo "Installed at $package_root"
+          test ! -e "$package_root/.git"
+          BLOCKTERM_PACKAGE_ROOT="$package_root" node -e "require(process.env.BLOCKTERM_PACKAGE_ROOT + '/node_modules/node-pty'); console.log('node-pty loads')"
+
   deploy:
     needs: [test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

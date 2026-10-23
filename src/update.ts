@@ -26,7 +26,8 @@ export function updateSteps(install: InstallKind): Step[] {
       { cmd: npm, args: ['run', 'build'] },
     ];
   }
-  return [{ cmd: npm, args: ['install', '-g', 'blockterm@latest'] }];
+  // Node 24's npm blocks dependency install scripts; node-pty needs its script on Linux (no prebuild).
+  return [{ cmd: npm, args: ['install', '-g', '--allow-scripts=node-pty', 'blockterm@latest'] }];
 }
 
 export function spawnStep(step: Step, cwd: string): Promise<number> {
