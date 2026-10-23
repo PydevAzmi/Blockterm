@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,6 +23,11 @@ afterEach(() => {
 function native(path: string): string {
   if (!/^\/[A-Za-z]\//.test(path)) return path;
   return path.replace(/^\/([A-Za-z])\//, (_m, d: string) => `${d.toUpperCase()}:\\`).replace(/\//g, '\\');
+}
+
+function scriptOf(command: string): string {
+  const m = /ReadAllText\('(.*)'\)\)$/.exec(command);
+  return m === null ? '' : m[1]!.replace(/''/g, "'");
 }
 
 test('shellKind recognises shells by basename without .exe', () => {
@@ -87,11 +92,11 @@ test('pwsh injection loads a script with -NoLogo -NoExit -Command', () => {
   );
   expect(inj.args.slice(0, 3)).toEqual(['-NoLogo', '-NoExit', '-Command']);
   const command = inj.args[3]!;
-  expect(command.startsWith(". '")).toBe(true);
-  expect(command.endsWith("'")).toBe(true);
-  expect(existsSync(command.slice(3, -1))).toBe(true);
+  expect(command.startsWith("Invoke-Expression ([System.IO.File]::ReadAllText('")).toBe(true);
+  expect(command.endsWith("'))")).toBe(true);
+  expect(existsSync(scriptOf(command))).toBe(true);
   inj.cleanup();
-  expect(existsSync(command.slice(3, -1))).toBe(false);
+  expect(existsSync(scriptOf(command))).toBe(false);
 });
 
 test('pwsh path is quoted with doubled single quotes', () => {
@@ -100,7 +105,7 @@ test('pwsh path is quoted with doubled single quotes', () => {
   const inj = inject({ file: 'pwsh', args: [] }, {}, root, 'linux');
   const command = inj.args[3]!;
   expect(command).toContain("''");
-  const unquoted = command.slice(3, -1).replace(/''/g, "'");
+  const unquoted = scriptOf(command).replace(/''/g, "'");
   expect(existsSync(unquoted)).toBe(true);
   inj.cleanup();
 });
@@ -127,14 +132,50 @@ test('BLOCKTERM_NO_INTEGRATION=1 returns the input unchanged', () => {
   inp.cleanup();
 });
 
-test('powershell and other shells are left unchanged', () => {
-  for (const file of ['powershell.exe', 'fish']) {
+test('other shells are left unchanged', () => {
+  for (const file of ['fish', 'cmd.exe']) {
     const inj = inject({ file, args: ['-x'] }, {}, tempDir());
     expect(inj.file).toBe(file);
     expect(inj.args).toEqual(['-x']);
     expect(inj.env).toEqual({});
     inj.cleanup();
   }
+});
+
+test('powershell is left unchanged off win32', () => {
+  for (const platform of ['linux', 'darwin'] as NodeJS.Platform[]) {
+    const inj = inject({ file: 'powershell.exe', args: ['-x'] }, {}, tempDir(), platform);
+    expect(inj.args).toEqual(['-x']);
+    expect(inj.env).toEqual({});
+    inj.cleanup();
+  }
+});
+
+test('win32 powershell.exe is injected without changing the execution policy, with a BOM script', () => {
+  const inj = inject(
+    { file: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', args: [] },
+    {},
+    tempDir(),
+    'win32',
+  );
+  expect(inj.args.slice(0, 3)).toEqual(['-NoLogo', '-NoExit', '-Command']);
+  expect(inj.args.join(' ')).not.toContain('ExecutionPolicy');
+  const command = inj.args[3]!;
+  expect(command.startsWith("Invoke-Expression ([System.IO.File]::ReadAllText('")).toBe(true);
+  expect(command.endsWith("'))")).toBe(true);
+  const script = scriptOf(command);
+  expect(existsSync(script)).toBe(true);
+  const raw = readFileSync(script);
+  expect([raw[0], raw[1], raw[2]]).toEqual([0xef, 0xbb, 0xbf]);
+  inj.cleanup();
+  expect(existsSync(script)).toBe(false);
+});
+
+test('pwsh scripts are written with a UTF-8 BOM too', () => {
+  const inj = inject({ file: 'pwsh', args: [] }, {}, tempDir(), 'linux');
+  const raw = readFileSync(scriptOf(inj.args[3]!));
+  expect([raw[0], raw[1], raw[2]]).toEqual([0xef, 0xbb, 0xbf]);
+  inj.cleanup();
 });
 
 test('the scripts emit OSC 133 and OSC 7 marks', () => {
