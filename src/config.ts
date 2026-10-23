@@ -13,11 +13,36 @@ export interface Config {
   baseURL: string | null;
   name: string | null;
   shell: string | null;
+  /** Extra arguments for `shell`, e.g. ["--login"]. */
+  shellArgs?: string[];
+  /** Color of agent replies: a name (cyan, bright-magenta, ...), 0-255, or #rrggbb. */
+  agentColor?: string;
   headers: Record<string, string> | null;
   sessionHeader: string | null;
 }
 
 const HEADER_NAME = /^[A-Za-z0-9-]+$/;
+
+const COLOR_NAMES = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+
+/** SGR parameters for a color spec; null for an unknown spec. */
+export function parseColor(spec: string): string | null {
+  const name = spec.trim().toLowerCase();
+  const base = COLOR_NAMES.indexOf(name);
+  if (base >= 0) return String(30 + base);
+  const bright = name.startsWith('bright-') ? COLOR_NAMES.indexOf(name.slice(7)) : -1;
+  if (bright >= 0) return String(90 + bright);
+  if (name === 'gray' || name === 'grey') return '90';
+  if (/^\d{1,3}$/.test(name) && Number(name) <= 255) return `38;5;${Number(name)}`;
+  const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/.exec(name);
+  if (hex !== null) return `38;2;${parseInt(hex[1]!, 16)};${parseInt(hex[2]!, 16)};${parseInt(hex[3]!, 16)}`;
+  return null;
+}
+
+/** SGR for agent replies; cyan when unset. */
+export function colorSgr(spec: string | null): string {
+  return (spec === null ? null : parseColor(spec)) ?? '36';
+}
 
 export function normalizeBaseURL(url: string): string {
   return url.replace(/\/chat\/completions\/?$/, '');
@@ -96,6 +121,20 @@ export function validateConfig(raw: unknown): LoadResult {
 
   const baseURL = rawBaseURL === null ? null : normalizeBaseURL(rawBaseURL);
 
+  const shellArgs = raw.shellArgs;
+  if (
+    shellArgs !== undefined &&
+    (!Array.isArray(shellArgs) || !shellArgs.every(arg => typeof arg === 'string'))
+  ) {
+    return invalid('shellArgs must be an array of strings');
+  }
+
+  const rawColor = raw.agentColor;
+  const agentColor = typeof rawColor === 'number' ? String(rawColor) : rawColor;
+  if (agentColor !== undefined && (typeof agentColor !== 'string' || parseColor(agentColor) === null)) {
+    return invalid('agentColor must be a color name, 0-255, or #rrggbb');
+  }
+
   const rawHeaders = raw.headers === undefined ? null : raw.headers;
   let headers: Record<string, string> | null = null;
   if (rawHeaders !== null) {
@@ -120,7 +159,18 @@ export function validateConfig(raw: unknown): LoadResult {
 
   return {
     ok: true,
-    config: { provider: pkg, model, apiKeyEnv, baseURL, name, shell, headers, sessionHeader },
+    config: {
+      provider: pkg,
+      model,
+      apiKeyEnv,
+      baseURL,
+      name,
+      shell,
+      ...(shellArgs !== undefined ? { shellArgs: shellArgs as string[] } : {}),
+      ...(agentColor !== undefined ? { agentColor } : {}),
+      headers,
+      sessionHeader,
+    },
   };
 }
 

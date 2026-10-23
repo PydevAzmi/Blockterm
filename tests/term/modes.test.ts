@@ -61,13 +61,10 @@ test('hostModesFrom reads the mirror modes', async () => {
   tracked.dispose();
 });
 
-test('hostModesFrom requests vt200 for the wheel when asked', async () => {
+test('hostModesFrom leaves the mouse to the host terminal unless the program asks', () => {
   const term = new XtermTerminal({ allowProposedApi: true });
   const tracked = trackModes(term);
-  expect(hostModesFrom(term, tracked.get(), true).mouse).toBe('vt200');
-
-  await write(term, '\x1b[?1003h');
-  expect(hostModesFrom(term, tracked.get(), true).mouse).toBe('any');
+  expect(hostModesFrom(term, tracked.get()).mouse).toBe('none');
   tracked.dispose();
 });
 

@@ -15,7 +15,7 @@ export { shellExists };
 export type Cli =
   | { kind: 'version' }
   | { kind: 'help' }
-  | { kind: 'run'; shell?: string }
+  | { kind: 'run'; shell?: string; shellArgs?: string[] }
   | { kind: 'setup' }
   | { kind: 'doctor' }
   | { kind: 'update' }
@@ -34,9 +34,13 @@ export function parseArgs(argv: string[]): Cli {
     const arg = argv[i]!;
     if (arg === '--version' || arg === '-v') return { kind: 'version' };
     if (arg === '--help' || arg === '-h') return { kind: 'help' };
+    if (arg === '--') {
+      if (shell === undefined) return { kind: 'error', message: 'shell arguments after -- need --shell' };
+      return { kind: 'run', shell, shellArgs: argv.slice(i + 1) };
+    }
     if (arg === '--shell') {
       const next = argv[i + 1];
-      if (next === undefined) return { kind: 'error', message: '--shell needs a path' };
+      if (next === undefined) return { kind: 'error', message: '--shell needs a shell name or path' };
       shell = next;
       i += 1;
       continue;
@@ -59,17 +63,18 @@ export function isMain(argv1: string | undefined, metaUrl: string): boolean {
 }
 
 const HELP = [
-  'usage: blockterm [setup | doctor | update] [--shell <path>] [--version] [--help]',
+  'usage: blockterm [setup | doctor | update] [--shell <shell> [-- <args>...]] [--version] [--help]',
   '',
   'commands:',
-  '  setup           choose the model and save the config',
-  '  doctor          check node, pty, shell, config, key and model',
-  '  update          update blockterm itself (git pull or npm), then rebuild',
+  '  setup            choose the model and save the config',
+  '  doctor           check node, pty, shell, config, key and model',
+  '  update           update blockterm itself (git pull or npm), then rebuild',
   '',
   'options:',
-  '  --shell <path>  run the given shell instead of the default',
-  '  --version, -v   print the version and exit',
-  '  --help, -h      print this help and exit',
+  '  --shell <shell>  run this shell (name on PATH or full path) instead of the default',
+  '  -- <args>...     pass the rest to that shell, e.g. --shell bash -- --login',
+  '  --version, -v    print the version and exit',
+  '  --help, -h       print this help and exit',
 ].join('\n');
 
 function version(): string {
@@ -225,6 +230,7 @@ async function main(): Promise<void> {
     platform: process.platform,
     env: process.env,
     override: cli.shell ?? configShell ?? undefined,
+    overrideArgs: cli.shell !== undefined ? cli.shellArgs : loaded.ok ? loaded.config.shellArgs : undefined,
     onPath: exe => isOnPath(exe, process.env, process.platform),
   });
 

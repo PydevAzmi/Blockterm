@@ -95,7 +95,7 @@ test('a pending resize debounce suppresses old-size frames', async () => {
   expect(stdout.writes.length).toBe(baseline);
 
   await vi.advanceTimersByTimeAsync(60);
-  expect(pty.resizes).toEqual([[96, 27]]);
+  expect(pty.resizes).toEqual([[100, 29]]);
   expect(stdout.writes.length).toBeGreaterThan(baseline);
 
   pty.exit(0);

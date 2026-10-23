@@ -3,7 +3,7 @@ export interface Size {
   rows: number;
 }
 
-export type PanelMode = 'hidden' | 'docked' | 'overlay';
+export type PanelMode = 'hidden' | 'docked';
 
 export interface Rect {
   row: number;
@@ -21,41 +21,24 @@ export interface Layout {
 
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n));
 
+// The shell gets the full width. The last host row is the mode line; when the agent is open,
+// a fixed strip above it holds the transcript (fixed so streaming text never resizes the pty).
 export function computeLayout(host: Size, panelOpen = false): Layout {
-  const ptyRows = Math.max(1, host.rows - 3);
-  const hiddenCols = Math.max(1, host.cols - 4);
+  const strip = panelOpen ? Math.min(clamp(Math.floor(host.rows / 4), 2, 10), Math.max(0, host.rows - 2)) : 0;
+  const ptyRows = Math.max(1, host.rows - 1 - strip);
+  const pty = { cols: Math.max(1, host.cols), rows: ptyRows };
 
   if (!panelOpen) {
-    return {
-      host,
-      pty: { cols: hiddenCols, rows: ptyRows },
-      origin: { row: 1, col: 2 },
-      panel: { mode: 'hidden', rect: null },
-    };
-  }
-
-  const width = clamp(Math.floor(host.cols / 3), 36, 60);
-  const dockedCols = host.cols - 4 - width;
-
-  if (dockedCols >= 60) {
-    return {
-      host,
-      pty: { cols: dockedCols, rows: ptyRows },
-      origin: { row: 1, col: 2 },
-      panel: {
-        mode: 'docked',
-        rect: { row: 1, col: 4 + dockedCols, rows: ptyRows, cols: width },
-      },
-    };
+    return { host, pty, origin: { row: 0, col: 0 }, panel: { mode: 'hidden', rect: null } };
   }
 
   return {
     host,
-    pty: { cols: hiddenCols, rows: ptyRows },
-    origin: { row: 1, col: 2 },
+    pty,
+    origin: { row: 0, col: 0 },
     panel: {
-      mode: 'overlay',
-      rect: { row: 1, col: 1, rows: ptyRows, cols: Math.max(0, host.cols - 2) },
+      mode: 'docked',
+      rect: { row: ptyRows, col: 0, rows: Math.max(1, host.rows - ptyRows), cols: host.cols },
     },
   };
 }

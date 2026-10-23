@@ -2,7 +2,7 @@ import type { IBufferCell, Terminal } from '@xterm/headless';
 
 import type { Layout } from '../layout.js';
 import type { View } from '../term/session.js';
-import { composeBlocks, type BlockAction, type BlockRow, type BlocksView } from './blocks.js';
+import { composeBlocks, type BlockRow, type BlocksView } from './blocks.js';
 
 export interface Cell {
   ch: string;
@@ -16,11 +16,11 @@ export interface Frame {
   cells: Cell[];
   cursor: { row: number; col: number; visible: boolean };
   blocksDocHeight?: number;
-  blockActions?: BlockAction[];
   blockRows?: BlockRow[];
 }
 
 export interface Chrome {
+  mode?: string;
   title: string;
   footer: string;
   view: View;
@@ -29,7 +29,10 @@ export interface Chrome {
   now?: number;
 }
 
-export const FOOTER = 'F1 help · ctrl+k agent · ctrl+l clear';
+export const FOOTER = 'F1 help · ctrl+k agent';
+const MODE_SGR = '1';
+const DIM_SGR = '2';
+const STATUS_SGR = '33';
 
 export function cellFrom(cell: IBufferCell): Cell {
   const width = cell.getWidth();
@@ -85,110 +88,80 @@ export function composeFrame(
   const cells: Cell[] = new Array<Cell>(cols * rows);
 
   const put = (r: number, c: number, ch: string, width: 0 | 1 | 2, sgr: string): void => {
+    if (r < 0 || r >= rows || c < 0 || c >= cols) return;
     cells[r * cols + c] = { ch, width, sgr };
   };
 
-  const putText = (r: number, text: string): void => {
-    for (let c = 0; c < cols; c += 1) {
-      put(r, c, c < text.length ? text[c]! : ' ', 1, '');
+  const putRun = (r: number, c: number, text: string, sgr: string): number => {
+    let x = c;
+    for (const ch of Array.from(text)) {
+      if (x >= cols) break;
+      put(r, x, ch, 1, sgr);
+      x += 1;
     }
-  };
-
-  const framed = (open: string, content: string, close: string): string => {
-    let line = open + content;
-    const head = cols - 1;
-    if (line.length > head) line = line.slice(0, head);
-    else line = line.padEnd(head, '─');
-    return line + close;
+    return x;
   };
 
   for (let i = 0; i < cells.length; i += 1) cells[i] = { ch: ' ', width: 1, sgr: '' };
 
-  putText(0, framed('┌ ', `${chrome.title} `, '┐'));
-  putText(rows - 2, framed('├', '', '┤'));
-  const footer =
-    chrome.footerStatus !== undefined && chrome.footerStatus !== ''
-      ? `${chrome.footer}  ${chrome.footerStatus}`
-      : chrome.footer;
-  putText(rows - 1, framed('└ ', `${footer} `, '┘'));
+  // Mode line: "(pwsh) ~/proj (main) · model" on the left, hints or status on the right.
+  const status = chrome.footerStatus ?? '';
+  const right = status !== '' ? status : chrome.footer;
+  const rightWidth = Array.from(right).length;
+  let x = 0;
+  if (chrome.mode !== undefined && chrome.mode !== '') x = putRun(rows - 1, x, `(${chrome.mode}) `, MODE_SGR);
+  const room = Math.max(0, cols - x - (rightWidth > 0 ? rightWidth + 2 : 0));
+  // Too long: keep the end (folder tail, branch, model), elide the start.
+  const title = Array.from(chrome.title);
+  const shown = title.length <= room ? title : room > 0 ? ['…', ...title.slice(title.length - room + 1)] : [];
+  putRun(rows - 1, x, shown.join(''), DIM_SGR);
+  if (rightWidth > 0 && rightWidth + 1 < cols) {
+    putRun(rows - 1, cols - rightWidth, right, status !== '' ? STATUS_SGR : DIM_SGR);
+  }
 
   const active = mirror.buffer.active;
   const reCell = active.getNullCell();
-  const side = chrome.view === 'blocks' ? '│' : ' ';
-  const rightSide = layout.origin.col + layout.pty.cols;
-  const rightBorder = rightSide + 1;
+  const top = layout.origin.row;
+  const left = layout.origin.col;
   const blocks =
     chrome.view === 'blocks' && chrome.blocks !== undefined && chrome.blocks.store.integrated
-      ? composeBlocks(
-          mirror,
-          chrome.blocks,
-          { cols: layout.pty.cols + 2, rows: layout.pty.rows },
-          chrome.now ?? Date.now(),
-        )
+      ? composeBlocks(mirror, chrome.blocks, layout.pty, chrome.now ?? Date.now())
       : null;
 
-  const blockActions: BlockAction[] = [];
-  if (blocks !== null) {
-    const left = layout.origin.col - 1;
-    for (const action of blocks.actions) {
-      blockActions.push({
-        ...action,
-        row: action.row + layout.origin.row,
-        col: left + action.col,
-      });
-    }
-  }
-
-  for (let r = 1; r <= rows - 3; r += 1) {
-    put(r, 0, '│', 1, '');
-    if (rightBorder < cols) put(r, rightBorder, '│', 1, '');
-    put(r, 1, side, 1, '');
-    if (rightSide > 1 && rightSide < cols) put(r, rightSide, side, 1, '');
-
+  for (let i = 0; i < layout.pty.rows; i += 1) {
+    const r = top + i;
     if (blocks !== null) {
-      const blockRow = blocks.rows[r - 1];
-      if (blockRow !== undefined) {
-        const left = layout.origin.col - 1;
-        for (let x = 0; x < blockRow.length && left + x < cols; x += 1) {
-          const copied = blockRow[x]!;
-          put(r, left + x, copied.ch, copied.width, copied.sgr);
-        }
+      const blockRow = blocks.rows[i];
+      if (blockRow === undefined) continue;
+      for (let c = 0; c < blockRow.length && left + c < cols; c += 1) {
+        const copied = blockRow[c]!;
+        put(r, left + c, copied.ch, copied.width, copied.sgr);
       }
       continue;
     }
 
-    const i = r - 1;
-    if (i >= layout.pty.rows) continue;
     const line = active.getLine(active.viewportY + i);
     if (!line) continue;
-
-    for (let x = 0; x < layout.pty.cols; x += 1) {
-      const c = 2 + x;
-      if (c > cols - 3) break;
-      const cell = line.getCell(x, reCell);
+    for (let c = 0; c < layout.pty.cols && left + c < cols; c += 1) {
+      const cell = line.getCell(c, reCell);
       if (!cell) continue;
       const copied = cellFrom(cell);
-      put(r, c, copied.ch, copied.width, copied.sgr);
+      put(r, left + c, copied.ch, copied.width, copied.sgr);
     }
   }
 
   let cursor = {
-    row: layout.origin.row + active.cursorY,
-    col: layout.origin.col + active.cursorX,
+    row: top + active.cursorY,
+    col: left + active.cursorX,
     visible:
       cursorVisible && active.viewportY === active.baseY && active.cursorX < layout.pty.cols,
   };
 
   if (blocks !== null) {
-    if (blocks.cursor !== null) {
-      cursor = {
-        row: layout.origin.row + blocks.cursor.row,
-        col: layout.origin.col - 1 + blocks.cursor.col,
-        visible: cursorVisible,
-      };
-    } else {
-      cursor = { ...cursor, visible: false };
-    }
+    cursor =
+      blocks.cursor !== null
+        ? { row: top + blocks.cursor.row, col: left + blocks.cursor.col, visible: cursorVisible }
+        : { ...cursor, visible: false };
   }
 
   return {
@@ -197,7 +170,6 @@ export function composeFrame(
     cells,
     cursor,
     blocksDocHeight: blocks?.docHeight,
-    blockActions: blocks !== null ? blockActions : undefined,
     blockRows: blocks?.blockRows,
   };
 }

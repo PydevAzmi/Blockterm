@@ -370,7 +370,7 @@ test('a provider error adds a note pointing at blockterm doctor', async () => {
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
   await until(() => output(stdout).includes('check your model with blockterm doctor'));
-  expect(output(stdout)).toContain('error: provider down');
+  expect(output(stdout)).toContain('provider down');
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);
@@ -424,7 +424,7 @@ test('ctrl+k never reaches the pty', async () => {
   await expect(run).resolves.toBe(0);
 });
 
-test('opening the overlay does not resize the pty', async () => {
+test('opening the agent line takes rows from the pty, never columns', async () => {
   const { run, pty, stdin, stdout } = startApp({
     load: () => LOADED,
     model: okModel(sendKeysThenDone()),
@@ -434,14 +434,14 @@ test('opening the overlay does not resize the pty', async () => {
 
   stdin.emit('data', '\x0b');
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
-  await wait(20);
-  expect(pty.resizes).toEqual([]);
+  await until(() => pty.resizes.length >= 1);
+  expect(pty.resizes).toEqual([[90, 22]]);
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);
 });
 
-test('an overlay swallows mouse presses while focused and releases them once hidden', async () => {
+test('mouse presses are swallowed while the agent line has focus and pass once it does not', async () => {
   const { run, pty, stdin, stdout } = startApp({
     load: () => LOADED,
     model: okModel(sendKeysThenDone()),
@@ -467,7 +467,7 @@ test('an overlay swallows mouse presses while focused and releases them once hid
   await expect(run).resolves.toBe(0);
 });
 
-test('escape closes an idle overlay panel', async () => {
+test('escape closes an idle agent line', async () => {
   const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(sendKeysThenDone()) });
 
   stdin.emit('data', '\x0b');
@@ -479,7 +479,7 @@ test('escape closes an idle overlay panel', async () => {
   await expect(run).resolves.toBe(0);
 });
 
-test('closing a docked panel widens the pty back', async () => {
+test('closing the agent line gives the rows back to the pty', async () => {
   const { run, pty, stdin, stdout } = startApp({
     load: () => LOADED,
     model: okModel(sendKeysThenDone()),
@@ -490,11 +490,11 @@ test('closing a docked panel widens the pty back', async () => {
   stdin.emit('data', '\x0b');
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   await until(() => pty.resizes.length >= 1);
-  expect(pty.resizes.at(-1)).toEqual([136, 27]);
+  expect(pty.resizes.at(-1)).toEqual([200, 22]);
 
   stdin.emit('data', '\x1b');
   await until(() => pty.resizes.length >= 2);
-  expect(pty.resizes.at(-1)).toEqual([196, 27]);
+  expect(pty.resizes.at(-1)).toEqual([200, 29]);
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);
@@ -509,8 +509,7 @@ test('a throwing model factory shows a redacted error and resets to idle', async
   stdin.emit('data', '\x0b');
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
-  await until(() => output(stdout).includes('error:'));
-  expect(output(stdout)).toContain('boom');
+  await until(() => output(stdout).includes('boom'));
   expect(output(stdout)).not.toContain('sk-secretvalue123');
 
   pty.exit(0);
@@ -553,7 +552,7 @@ test('a card too long to show rejects y but approves an edit with enter', async 
 });
 
 test('an edit whose keys do not all fit is not approved by enter', async () => {
-  const keys = `echo ${'x'.repeat(140)}<Enter>`;
+  const keys = `echo ${'x'.repeat(240)}<Enter>`;
   const { run, pty, stdin, stdout } = startApp({
     load: () => LOADED,
     model: okModel(sendKeysModel(keys)),
@@ -577,7 +576,7 @@ test('an edit whose keys do not all fit is not approved by enter', async () => {
 });
 
 test('the same edit fits and is approved in a wider panel', async () => {
-  const keys = `echo ${'x'.repeat(140)}<Enter>`;
+  const keys = `echo ${'x'.repeat(240)}<Enter>`;
   const { run, pty, stdin, stdout } = startApp({
     load: () => LOADED,
     model: okModel(sendKeysModel(keys)),
@@ -644,7 +643,7 @@ test('a truncated card that fits after a resize still needs a fresh quiet pause 
 test('an edit field that fits after a resize still needs a fresh quiet pause before enter', async () => {
   vi.useFakeTimers();
   try {
-    const keys = `echo ${'x'.repeat(140)}<Enter>`;
+    const keys = `echo ${'x'.repeat(240)}<Enter>`;
     const { run, pty, stdin, stdout } = startApp({
       load: () => LOADED,
       model: okModel(sendKeysModel(keys)),
@@ -757,7 +756,7 @@ test('F1 shows the help overlay, keys do not reach the pty, and Esc closes it', 
 
   stdin.emit('data', '\x1b[11~');
   await until(() => output(stdout).includes('blockterm keys'));
-  expect(output(stdout)).toContain('ctrl+k        agent panel / switch focus');
+  expect(output(stdout)).toContain('ctrl+k        agent line / switch focus');
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);

@@ -28,5 +28,6 @@ How to work:
 - Use run_command at an idle prompt to run a whole command as a new block.
 - Otherwise, use send_keys with the key syntax: text is sent literally, keys are named like <Enter>, <Esc>, <C-c>; write <lt> for a literal <.
 - Prefer one small step per send_keys call, then read the screen again.
-- Inside full-screen programs like vim, send the program's own keys (for example <Esc> then :w<Enter>).`;
+- Inside full-screen programs like vim, send the program's own keys (for example <Esc> then :w<Enter>).
+- Reply in one or two short plain sentences, no markdown.`;
 }

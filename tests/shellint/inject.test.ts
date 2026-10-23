@@ -185,3 +185,19 @@ test('the scripts emit OSC 133 and OSC 7 marks', () => {
     }
   }
 });
+
+test('bash keeps the user shell args after --rcfile', () => {
+  const inj = inject({ file: BASH_FILE, args: ['--login', '-i'] }, {}, tempDir());
+  expect(inj.args[0]).toBe('--rcfile');
+  expect(inj.args.slice(2)).toEqual(['--login', '-i']);
+});
+
+test('pwsh keeps the user shell args before -Command and drops a duplicate -NoLogo', () => {
+  const inj = inject(
+    { file: 'pwsh.exe', args: ['-NoLogo', '-NoProfile'] },
+    {},
+    tempDir(),
+    'linux',
+  );
+  expect(inj.args.slice(0, 4)).toEqual(['-NoProfile', '-NoLogo', '-NoExit', '-Command']);
+});

@@ -67,13 +67,11 @@ test('headerText shows folder, branch and model', () => {
       branch: 'main',
       model: 'claude-haiku-5-5',
     }),
-  ).toBe('blockterm  ~/proj (main)  · claude-haiku-5-5');
+  ).toBe('~/proj (main) · claude-haiku-5-5');
 });
 
-test('headerText with no folder is just the app name', () => {
-  expect(headerText({ folder: null, home: '/home/u', branch: null, model: null })).toBe(
-    'blockterm',
-  );
+test('headerText with no folder and no model is empty', () => {
+  expect(headerText({ folder: null, home: '/home/u', branch: null, model: null })).toBe('');
 });
 
 test.runIf(process.platform === 'win32')('headerText matches home across Windows separators', () => {
@@ -84,5 +82,5 @@ test.runIf(process.platform === 'win32')('headerText matches home across Windows
       branch: null,
       model: null,
     }),
-  ).toBe('blockterm  ~/Proj');
+  ).toBe('~/Proj');
 });

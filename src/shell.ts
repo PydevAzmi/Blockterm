@@ -50,9 +50,10 @@ export function resolveShell(o: {
   platform: NodeJS.Platform;
   env: Record<string, string | undefined>;
   override?: string;
+  overrideArgs?: string[];
   onPath: (exe: string) => boolean;
 }): ShellChoice {
-  if (o.override) return { file: o.override, args: [] };
+  if (o.override) return { file: o.override, args: o.overrideArgs ?? [] };
 
   if (o.platform === 'win32') {
     return o.onPath('pwsh')
@@ -71,4 +72,9 @@ export function shellExists(
 ): boolean {
   if (file.includes('/') || file.includes('\\')) return exists(file);
   return isOnPath(file, env, platform);
+}
+
+/** "pwsh", "bash", "zsh", ... — the label shown in parentheses on the mode line. */
+export function shellName(file: string): string {
+  return (file.replace(/\\/g, '/').split('/').pop() ?? file).replace(/\.exe$/i, '');
 }

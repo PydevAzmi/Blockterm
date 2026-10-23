@@ -33,65 +33,73 @@ function rowText(f: Frame, row: number): string {
 
 const thirtyLines = Array.from({ length: 30 }, (_, i) => `L${i}`).join('\r\n');
 
-test('mirror text lands inside the borders', async () => {
+test('mirror text starts at the top-left corner with no frame', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, 'hi');
   const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
-  expect(cell(f, 1, 2).ch).toBe('h');
-  expect(cell(f, 1, 3).ch).toBe('i');
+  expect(cell(f, 0, 0).ch).toBe('h');
+  expect(cell(f, 0, 1).ch).toBe('i');
 });
 
-test('frame corners', async () => {
+test('no box drawing surrounds the terminal', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, '');
   const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
-  expect(cell(f, 0, 0).ch).toBe('┌');
-  expect(cell(f, 0, 39).ch).toBe('┐');
-  expect(cell(f, 8, 0).ch).toBe('├');
-  expect(cell(f, 9, 0).ch).toBe('└');
+  for (let r = 0; r < f.rows; r += 1) expect(rowText(f, r)).not.toMatch(/[┌┐└┘├┤│]/);
 });
 
-test('borders depend on the view', async () => {
+test('the mode line names the shell in parentheses, with hints on the right', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, '');
-  const blocks = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
-  const full = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'fullscreen' }, true);
-  expect(cell(blocks, 1, 1).ch).toBe('│');
-  expect(cell(full, 1, 1).ch).toBe(' ');
+  const f = composeFrame(m, layout, { mode: 'pwsh', title: '~/proj', footer: 'F1 help', view: 'blocks' }, true);
+  const last = rowText(f, f.rows - 1);
+  expect(last.startsWith('(pwsh) ~/proj')).toBe(true);
+  expect(last.endsWith('F1 help')).toBe(true);
+  expect(cell(f, f.rows - 1, 0).sgr).toBe('1');
+  expect(cell(f, f.rows - 1, 7).sgr).toBe('2');
+});
+
+test('a status replaces the hints and stands out', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, '');
+  const f = composeFrame(m, layout, { mode: 'bash', title: '~', footer: 'F1 help', footerStatus: 'agent busy', view: 'blocks' }, true);
+  const last = rowText(f, f.rows - 1);
+  expect(last.endsWith('agent busy')).toBe(true);
+  expect(last).not.toContain('F1 help');
+  expect(cell(f, f.rows - 1, f.cols - 1).sgr).toBe('33');
 });
 
 test('palette foreground', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, '\x1b[31mR');
   const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
-  expect(cell(f, 1, 2).sgr).toBe('31');
+  expect(cell(f, 0, 0).sgr).toBe('31');
 });
 
 test('bold truecolor foreground', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, '\x1b[1;38;2;1;2;3mX');
   const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
-  expect(cell(f, 1, 2).sgr).toBe('1;38;2;1;2;3');
+  expect(cell(f, 0, 0).sgr).toBe('1;38;2;1;2;3');
 });
 
 test('256-colour foreground', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, '\x1b[38;5;200mY');
   const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
-  expect(cell(f, 1, 2).sgr).toBe('38;5;200');
+  expect(cell(f, 0, 0).sgr).toBe('38;5;200');
 });
 
 test('palette background', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, '\x1b[44mZ');
   const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
-  expect(cell(f, 1, 2).sgr).toBe('44');
+  expect(cell(f, 0, 0).sgr).toBe('44');
 });
 
 test('wide characters take two cells', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, '世');
   const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
-  expect(cell(f, 1, 2).width).toBe(2);
-  expect(cell(f, 1, 3).width).toBe(0);
+  expect(cell(f, 0, 0).width).toBe(2);
+  expect(cell(f, 0, 1).width).toBe(0);
 });
 
 test('cursor follows the mirror', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, 'hi');
   const shown = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
-  expect(shown.cursor).toEqual({ row: 1, col: 4, visible: true });
+  expect(shown.cursor).toEqual({ row: 0, col: 2, visible: true });
   const hidden = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, false);
   expect(hidden.cursor.visible).toBe(false);
 });
@@ -110,8 +118,8 @@ test('footer sits on the last row', async () => {
 test('shows the bottom of a scrolled buffer', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, thirtyLines);
   const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
-  expect(rowText(f, 7).slice(2, 5)).toBe('L29');
-  expect(rowText(f, 1).slice(2, 5)).toBe('L23');
+  expect(rowText(f, 8).slice(0, 3)).toBe('L29');
+  expect(rowText(f, 0).slice(0, 3)).toBe('L21');
 });
 
 test('hides cursor when scrolled back', async () => {
@@ -119,7 +127,7 @@ test('hides cursor when scrolled back', async () => {
   m.scrollLines(-5);
   const f = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
   expect(f.cursor.visible).toBe(false);
-  expect(rowText(f, 1).slice(2, 5)).toBe('L18');
+  expect(rowText(f, 0).slice(0, 3)).toBe('L16');
 });
 
 test('tiny host stays rectangular', async () => {

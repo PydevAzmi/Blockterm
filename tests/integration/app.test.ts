@@ -18,7 +18,7 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SHELL = process.platform === 'win32' ? 'powershell.exe' : '/bin/sh';
 const COLS = 80;
 const ROWS = 24;
-const FOOTER = 'F1 help · ctrl+k agent · ctrl+l clear';
+const FOOTER = 'F1 help · ctrl+k agent';
 
 function screen(host: XtermTerminal): string {
   const buffer = host.buffer.active;
@@ -66,7 +66,7 @@ test('blockterm runs a real shell end to end', async () => {
     await waitFor(() => host.buffer.active.type === 'alternate', 15000);
     await waitFor(() => {
       const lines = screen(host).split('\n');
-      return lines[0]!.includes('blockterm') && lines[ROWS - 1]!.includes(FOOTER);
+      return lines[ROWS - 1]!.startsWith('(') && lines[ROWS - 1]!.includes(FOOTER);
     }, 15000);
 
     await waitFor(() => /[#$>]/.test(screen(host)), 10000);

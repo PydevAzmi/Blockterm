@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, expect, test } from 'vitest';
 
-import { isOnPath, resolveShell } from '../src/shell.js';
+import { isOnPath, resolveShell, shellName } from '../src/shell.js';
 
 const env = { SHELL: '/bin/zsh', PATH: '' };
 
@@ -59,3 +59,14 @@ test('isOnPath: posix returns false for a missing executable', () => {
   const dir = tempDir();
   expect(inDir(dir, () => isOnPath('nope', { PATH: '.' }, 'linux'))).toBe(false);
 });
+
+test('shellName strips the folder and .exe', () => {
+  expect(shellName('C:\\Program Files\\PowerShell\\7\\pwsh.exe')).toBe('pwsh');
+  expect(shellName('/usr/bin/zsh')).toBe('zsh');
+  expect(shellName('fish')).toBe('fish');
+});
+
+test('resolveShell keeps override args', () =>
+  expect(
+    resolveShell({ platform: 'linux', env: {}, override: 'bash', overrideArgs: ['--login'], onPath: () => true }),
+  ).toEqual({ file: 'bash', args: ['--login'] }));

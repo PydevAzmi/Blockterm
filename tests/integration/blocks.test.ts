@@ -110,7 +110,7 @@ test.skipIf(shellFile === null)(`blocks end to end in a real shell (${shellFile}
       () =>
         screen(host)
           .split('\n')
-          .some(line => line.includes('┌ $ echo hi') && line.includes('✔')),
+          .some(line => line.startsWith('$ echo hi ─') && line.includes('✔')),
       20000,
     );
 
@@ -119,7 +119,7 @@ test.skipIf(shellFile === null)(`blocks end to end in a real shell (${shellFile}
       () =>
         screen(host)
           .split('\n')
-          .some(line => line.includes(`┌ $ ${failCommand}`) && line.includes('✘')),
+          .some(line => line.startsWith(`$ ${failCommand} ─`) && line.includes('✘')),
       20000,
     );
 

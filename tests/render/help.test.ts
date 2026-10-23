@@ -23,11 +23,12 @@ function rowsText(cells: Cell[], cols: number): string[] {
 test('HELP_LINES is the exact help copy', () => {
   expect(HELP_LINES).toEqual([
     'blockterm keys',
-    'ctrl+k        agent panel / switch focus',
+    'ctrl+k        agent line / switch focus',
     '#             suggest a command (empty prompt)',
     'ctrl+↑ ctrl+↓ select a block',
     '  c o r e     copy command, copy output, rerun, explain',
     'shift+PgUp/Dn scroll blocks',
+    'mouse drag    select text; your terminal copies it',
     'ctrl+l        clear blocks (idle prompt)',
     'F1 / Esc      close this help',
     "ctrl+k replaces readline's kill-line and vim's ctrl+k digraphs.",

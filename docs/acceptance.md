@@ -90,8 +90,15 @@ model.
   input closes.
 - [ ] **A model that can't call tools still works for `#`.** Use a provider or model without tool
   support; `#` still returns one command.
-- [ ] **Explain error on a failing `npm test`.** Run `npm test` until it fails, click
-  `[Explain error]` on the block, and check the panel shows an explanation.
+- [ ] **Explain error on a failing `npm test`.** Run `npm test` until it fails, press
+  `ctrl+↑` then `e`, and check the agent line shows an explanation.
+
+## Borderless view
+
+- [ ] **No frame, no side pane.** The shell fills the window; the last line reads `(your-shell) folder (branch) · model`.
+- [ ] **Native copy.** Drag across block output with the mouse and copy it with your terminal's own copy; the pasted text has no border characters.
+- [ ] **Agent line.** `ctrl+k` shows `(agent · model) ❯` at the bottom; a reply appears above it in `agentColor` (try `"agentColor": "magenta"`).
+- [ ] **Two at once.** Open two tabs, `blockterm --shell bash` in one and `blockterm --shell pwsh` in the other; both work independently.
 
 ## Slice 7: PS 5.1, selection and help
 

@@ -2,36 +2,30 @@ import { expect, test } from 'vitest';
 
 import { computeLayout } from '../src/layout.js';
 
-test('pty is host minus chrome', () =>
+test('pty takes the full width and every row but the mode line', () =>
   expect(computeLayout({ cols: 120, rows: 40 })).toEqual({
     host: { cols: 120, rows: 40 },
-    pty: { cols: 116, rows: 37 },
-    origin: { row: 1, col: 2 },
+    pty: { cols: 120, rows: 39 },
+    origin: { row: 0, col: 0 },
     panel: { mode: 'hidden', rect: null },
   }));
 test('tiny host clamps to 1x1', () =>
-  expect(computeLayout({ cols: 3, rows: 2 }).pty).toEqual({ cols: 1, rows: 1 }));
+  expect(computeLayout({ cols: 1, rows: 1 }).pty).toEqual({ cols: 1, rows: 1 }));
 test('closed panel is hidden with a null rect', () =>
   expect(computeLayout({ cols: 120, rows: 40 }, false).panel).toEqual({ mode: 'hidden', rect: null }));
-test('docked panel keeps the pty at least 60 cols and sits to its right', () =>
+test('open agent docks a full-width strip under the pty, ending on the input line', () =>
   expect(computeLayout({ cols: 200, rows: 50 }, true)).toEqual({
     host: { cols: 200, rows: 50 },
-    pty: { cols: 136, rows: 47 },
-    origin: { row: 1, col: 2 },
-    panel: { mode: 'docked', rect: { row: 1, col: 140, rows: 47, cols: 60 } },
+    pty: { cols: 200, rows: 39 },
+    origin: { row: 0, col: 0 },
+    panel: { mode: 'docked', rect: { row: 39, col: 0, rows: 11, cols: 200 } },
   }));
-test('overlay covers the full width when docking would starve the pty', () =>
-  expect(computeLayout({ cols: 90, rows: 30 }, true)).toEqual({
-    host: { cols: 90, rows: 30 },
-    pty: { cols: 86, rows: 27 },
-    origin: { row: 1, col: 2 },
-    panel: { mode: 'overlay', rect: { row: 1, col: 1, rows: 27, cols: 88 } },
-  }));
+test('the strip is at least two rows above the input line on a short host', () =>
+  expect(computeLayout({ cols: 90, rows: 6 }, true).panel.rect).toEqual({ row: 3, col: 0, rows: 3, cols: 90 }));
 test('tiny host with the panel open never produces a negative size', () => {
   const l = computeLayout({ cols: 10, rows: 4 }, true);
   expect(l.pty.cols).toBeGreaterThanOrEqual(1);
   expect(l.pty.rows).toBeGreaterThanOrEqual(1);
   expect(l.panel.rect).not.toBeNull();
-  expect(l.panel.rect?.cols).toBeGreaterThanOrEqual(0);
-  expect(l.panel.rect?.rows).toBeGreaterThanOrEqual(0);
+  expect(l.pty.rows + l.panel.rect!.rows).toBe(4);
 });

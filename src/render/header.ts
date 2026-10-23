@@ -74,11 +74,10 @@ export function headerText(o: {
   branch: string | null;
   model: string | null;
 }): string {
-  let text = 'blockterm';
+  const parts: string[] = [];
   if (o.folder !== null) {
-    text += `  ${folderText(o.folder, o.home)}`;
-    if (o.branch !== null) text += ` (${o.branch})`;
+    parts.push(o.branch !== null ? `${folderText(o.folder, o.home)} (${o.branch})` : folderText(o.folder, o.home));
   }
-  if (o.model !== null) text += `  · ${o.model}`;
-  return text;
+  if (o.model !== null) parts.push(o.model);
+  return parts.join(' · ');
 }

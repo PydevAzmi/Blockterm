@@ -93,7 +93,8 @@ export function inject(
     const rc = join(dir, 'bashrc');
     writeFileSync(rc, BASH_RC_PREFIX + BASH_INTEGRATION, { mode: 0o600 });
     const argPath = platform === 'win32' ? msysPath(rc) : rc;
-    return { file: shell.file, args: ['--rcfile', argPath], env: {}, cleanup };
+    // bash reads long options only before short ones, so --rcfile goes first.
+    return { file: shell.file, args: ['--rcfile', argPath, ...shell.args], env: {}, cleanup };
   }
 
   if (kind === 'zsh') {
@@ -119,5 +120,7 @@ export function inject(
   // (Restricted/AllSigned would block it), and -ExecutionPolicy Bypass would lift that policy
   // for the user's whole session.
   const command = `Invoke-Expression ([System.IO.File]::ReadAllText('${pwshQuote(script)}'))`;
-  return { file: shell.file, args: ['-NoLogo', '-NoExit', '-Command', command], env: {}, cleanup };
+  // -Command must come last: everything after it is the command text.
+  const own = shell.args.filter(arg => arg.toLowerCase() !== '-nologo');
+  return { file: shell.file, args: [...own, '-NoLogo', '-NoExit', '-Command', command], env: {}, cleanup };
 }

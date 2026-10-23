@@ -4,7 +4,15 @@ import { join } from 'node:path';
 
 import { afterEach, expect, test } from 'vitest';
 
-import { type Config, configPath, defaultKeyEnv, loadConfig, saveConfig, validateConfig } from '../src/config.js';
+import {
+  type Config,
+  colorSgr,
+  configPath,
+  defaultKeyEnv,
+  loadConfig,
+  saveConfig,
+  validateConfig,
+} from '../src/config.js';
 
 test('configPath: win32 uses APPDATA', () =>
   expect(configPath('win32', { APPDATA: 'C:\\A' }, 'C:\\h')).toBe('C:\\A\\blockterm\\config.json'));
@@ -175,4 +183,37 @@ test('saveConfig: creates parent folders, round-trips, leaves no tmp', () => {
   saveConfig(file, anthropic);
   expect(loadConfig(file)).toEqual({ ok: true, config: anthropic });
   expect(readdirSync(join(dir, 'nested', 'deep')).filter(n => n.endsWith('.tmp'))).toEqual([]);
+});
+
+test('validateConfig: accepts agentColor names, 0-255 and #rrggbb', () => {
+  for (const agentColor of ['magenta', 'bright-cyan', 'gray', '141', '#7aa2f7']) {
+    const result = validateConfig({ ...anthropic, agentColor });
+    expect(result.ok && result.config.agentColor).toBe(agentColor);
+  }
+});
+
+test('validateConfig: rejects an unknown agentColor', () =>
+  expect(validateConfig({ ...anthropic, agentColor: 'sparkly' })).toEqual({
+    ok: false,
+    reason: 'invalid',
+    message: 'agentColor must be a color name, 0-255, or #rrggbb',
+  }));
+
+test('colorSgr maps specs to SGR and defaults to cyan', () => {
+  expect(colorSgr(null)).toBe('36');
+  expect(colorSgr('magenta')).toBe('35');
+  expect(colorSgr('bright-red')).toBe('91');
+  expect(colorSgr('141')).toBe('38;5;141');
+  expect(colorSgr('#7AA2F7')).toBe('38;2;122;162;247');
+  expect(colorSgr('nope')).toBe('36');
+});
+
+test('validateConfig: shellArgs must be an array of strings', () => {
+  const ok = validateConfig({ ...anthropic, shell: 'bash', shellArgs: ['--login'] });
+  expect(ok.ok && ok.config.shellArgs).toEqual(['--login']);
+  expect(validateConfig({ ...anthropic, shellArgs: '--login' })).toEqual({
+    ok: false,
+    reason: 'invalid',
+    message: 'shellArgs must be an array of strings',
+  });
 });

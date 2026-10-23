@@ -110,6 +110,8 @@ export async function runSetup(io: Io, path: string, existing: Config | null): P
     baseURL,
     name,
     shell: existing?.shell ?? null,
+    ...(existing?.shellArgs !== undefined ? { shellArgs: existing.shellArgs } : {}),
+    ...(existing?.agentColor !== undefined ? { agentColor: existing.agentColor } : {}),
     headers,
     sessionHeader,
   };

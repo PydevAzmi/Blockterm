@@ -82,16 +82,13 @@ export function trackModes(
 }
 
 // ponytail: RIS/DECSTR resets not tracked
-export function hostModesFrom(
-  mirror: Terminal,
-  t: TrackedModes,
-  wantWheel = false,
-): HostModes {
-  const inner = mirror.modes.mouseTrackingMode;
+// Mouse reporting is forwarded only when the program inside asks for it, so the host
+// terminal keeps its own selection and copy everywhere else.
+export function hostModesFrom(mirror: Terminal, t: TrackedModes): HostModes {
   return {
     appCursor: mirror.modes.applicationCursorKeysMode,
     appKeypad: mirror.modes.applicationKeypadMode,
-    mouse: wantWheel && inner === 'none' ? 'vt200' : inner,
+    mouse: mirror.modes.mouseTrackingMode,
     cursorStyle: t.cursorStyle,
   };
 }

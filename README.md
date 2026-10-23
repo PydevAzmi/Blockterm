@@ -1,31 +1,57 @@
 # Blockterm
-an open-source terminal named Blockterm. It wraps your real shell — ssh, vim, anything — and keeps it exactly as it is. Press `ctrl+k` to open an agent panel, describe what you want in plain words, and it types into your shell one approved keystroke at a time. Command blocks and `#` suggestions work today.
+an open-source terminal named Blockterm. It wraps your real shell — ssh, vim, anything — and keeps it exactly as it is. Press `ctrl+k` to open the agent line at the bottom, describe what you want in plain words, and it types into your shell one approved keystroke at a time. Command blocks and `#` suggestions work today.
 
 Website: https://blockterm.mohamedazmi.dev
 
 ## Blocks
 
-Each command's output becomes a block with its exit status and how long it took.
+Each command's output becomes a block: a one-line header with the command, its exit status and how long it took, then the output. There is no frame around the window — the shell gets every column.
 
-Scroll with the mouse wheel or `shift+PgUp`/`shift+PgDn`. At an idle prompt, `ctrl+l` clears the blocks.
+The last line is the mode line: your shell in parentheses, then the folder, git branch and model, e.g. `(pwsh) ~/proj (main) · deepseek-v4.1-flash`.
+
+Scroll with `shift+PgUp`/`shift+PgDn`. At an idle prompt, `ctrl+l` clears the blocks.
+
+Blockterm leaves the mouse to your terminal, so drag to select any text and copy it the way your terminal normally does (right-click, `ctrl+shift+c`, or copy-on-select). Programs that ask for the mouse, like vim with `mouse=a` or htop, still get it.
 
 Blocks work in bash (including Git Bash on Windows; macOS bash 3.2), zsh, PowerShell 7 (Windows and Linux; not macOS yet) and Windows PowerShell 5.1 (no profile changes and no execution-policy change; the integration script runs as-is). WSL bash runs without blocks for now. Set `BLOCKTERM_NO_INTEGRATION=1` to turn blocks off.
 
 ## Selecting, copying and rerunning
 
-Press `ctrl+↑` / `ctrl+↓` to select older / newer blocks, or click a block. With a block selected:
+Press `ctrl+↑` / `ctrl+↓` to select older / newer blocks. With a block selected:
 
 | Key | Action |
 | --- | --- |
 | `c` | copy the command |
 | `o` | copy the output |
 | `r` | rerun the command (only at an idle prompt) |
-| `e` | explain a failed command in the agent panel |
+| `e` | explain a failed command on the agent line |
 | `Enter` / `Esc` | back to the prompt |
 
 `PgUp` / `PgDn` / `Home` / `End` scroll the blocks while one is selected.
 
 Copying writes OSC 52 to the terminal and also pipes to the native clipboard tool: `clip` on Windows, `pbcopy` on macOS, `wl-copy` on Wayland, or `xclip -selection clipboard` on X11. Over ssh, OSC 52 sets the clipboard of the terminal you are sitting at when it supports it. In tmux, add `set -g set-clipboard on` to `~/.tmux.conf`.
+
+## Your shell, any number of windows
+
+Each `blockterm` is an independent process with its own shell, so run as many at once as you like — one per tab, pane or window. Pick the shell per launch:
+
+```bash
+blockterm --shell bash -- --login
+```
+
+```bash
+blockterm --shell "C:\Program Files\Git\bin\bash.exe"
+```
+
+Everything after `--` goes to the shell. Without `--shell`, the config's `shell` and `shellArgs` apply, then the default (`pwsh`, else Windows PowerShell, on Windows; `$SHELL` elsewhere).
+
+To open every new tab in Blockterm, make it a profile in your terminal. Windows Terminal (`settings.json` → `profiles.list`):
+
+```json
+{ "name": "Blockterm (pwsh)", "commandline": "blockterm --shell pwsh" }
+```
+
+iTerm2, GNOME Terminal, Kitty, WezTerm and Alacritty all take a startup command the same way: set it to `blockterm` (plus `--shell …` if you want a specific one).
 
 ## Help
 
@@ -35,7 +61,7 @@ Press `F1` for the key list. `F1` or `Esc` closes it.
 
 At an empty prompt, type `#`, write what you want in plain words, and press `Enter`. The suggested command is typed into your prompt for you to edit; it never runs on its own.
 
-A failed command's block ends with `[Explain error]`. Click it, or select the block and press `e`, to open the agent panel with an explanation of what went wrong.
+A failed command's header shows `✘` and its exit code. Select the block and press `e` to get an explanation of what went wrong on the agent line.
 
 ## Install
 
@@ -121,7 +147,9 @@ The agent can also run a command at an idle prompt (`run_command`), list recent 
 | `apiKeyEnv` | name of the environment variable holding the key (`""` for no key) |
 | `baseURL` | endpoint for `@ai-sdk/openai-compatible`; a trailing `/chat/completions` is stripped (the SDK adds it) |
 | `name` | provider name for `@ai-sdk/openai-compatible` |
-| `shell` | shell override for the terminal |
+| `shell` | shell to run instead of the default: a name on `PATH` (`bash`, `zsh`, `fish`, `nu`, `pwsh`, `cmd`) or a full path |
+| `shellArgs` | extra arguments for `shell`, e.g. `["--login"]` (default none) |
+| `agentColor` | color of agent replies: `cyan` (default), `magenta`, `bright-green`, …, `gray`, a 256-color number like `"141"`, or `"#7aa2f7"` |
 | `headers` | extra request headers, a map of header name to value (default `null`) |
 | `sessionHeader` | header name that carries one stable id per conversation (default `null`) |
 
@@ -143,6 +171,10 @@ The agent can also run a command at an idle prompt (`run_command`), list recent 
   "sessionHeader": "x-opencode-session"
 }
 ```
+
+### Agent line
+
+`ctrl+k` turns the mode line into the agent's input, labelled with the mode in parentheses: `(agent · your-model) ❯`. A few rows above it show the conversation; the agent's replies are short and drawn in `agentColor`. `ctrl+k` again returns focus to the shell; `Esc` closes the line (or cancels a running task).
 
 ### Privacy
 

@@ -10,6 +10,10 @@ export interface Transcript {
 
 export interface PanelView extends PanelUi {
   model?: string;
+  /** SGR for agent replies (config `agentColor`). */
+  color?: string;
+  /** Right-aligned note on the input line (approval pending, busy, ...). */
+  status?: string;
 }
 
 export interface CardView {
@@ -19,7 +23,9 @@ export interface CardView {
 
 const AMBER = '38;5;178';
 const AMBER_REVERSE = `${AMBER};7`;
-const PROMPT = '❯ ';
+const DIM = '2';
+const ERROR = '31';
+const DEFAULT_COLOR = '36';
 const CARD_ACTIONS = 'y approve  e edit  n deny  a allow for this task';
 const CARD_NOTICE = 'too long to show — e to edit, n to deny, or widen the window';
 
@@ -82,14 +88,13 @@ export function drawPanel(
     cells[row * frameCols + col] = { ch, width, sgr };
   };
 
-  const docked = rect.col > 1;
   const innerCol = rect.col;
-  const innerCols = Math.max(0, docked ? rect.cols - 1 : rect.cols);
+  const innerCols = Math.max(0, rect.cols);
+  const color = ui.color ?? DEFAULT_COLOR;
+  const focused = ui.focus === 'panel';
 
   for (let r = 0; r < rect.rows; r += 1) {
-    const row = rect.row + r;
-    for (let c = 0; c < rect.cols; c += 1) put(row, rect.col + c, ' ', 1, '');
-    if (docked) put(row, rect.col + rect.cols - 1, '│', 1, '');
+    for (let c = 0; c < rect.cols; c += 1) put(rect.row + r, rect.col + c, ' ', 1, '');
   }
 
   const writeRun = (row: number, col: number, text: string, sgr: string, max: number): number => {
@@ -138,15 +143,18 @@ export function drawPanel(
     }
   };
 
-  const title =
-    ui.model !== undefined && ui.model !== '' ? `agent · ${escapeControl(ui.model)}` : 'agent';
-  writeRun(rect.row, innerCol, title, '', innerCols);
-
+  // The input line names the mode in parentheses: "(agent · model) ❯ ".
+  const label =
+    ui.model !== undefined && ui.model !== '' ? `(agent · ${escapeControl(ui.model)})` : '(agent)';
+  const prompt = `${label} ❯ `;
   const inputRow = rect.row + rect.rows - 1;
-  const promptWidth = Array.from(PROMPT).reduce((sum, ch) => sum + charWidth(ch), 0);
+  const promptWidth = Math.min(
+    Array.from(prompt).reduce((sum, ch) => sum + charWidth(ch), 0),
+    Math.max(0, innerCols - 1),
+  );
   const inputWrapWidth = Math.max(1, innerCols - promptWidth);
   const allInputLines = wrapLine(escapeControl(ui.input), inputWrapWidth);
-  const maxInputRows = Math.max(1, rect.rows - 1);
+  const maxInputRows = Math.max(1, rect.rows);
   const inputTruncated = allInputLines.length > maxInputRows;
   const inputLines = inputTruncated
     ? allInputLines.slice(allInputLines.length - maxInputRows)
@@ -187,7 +195,7 @@ export function drawPanel(
     for (const line of wrapLine(CARD_ACTIONS, innerCols)) cardRows.push(...cellsFor(line, AMBER));
   }
 
-  const cardBudget = Math.max(0, contentEnd - rect.row);
+  const cardBudget = Math.max(0, contentEnd - rect.row + 1);
   const cardTruncated = card !== null && cardRows.length > cardBudget;
   let cardShown = cardRows;
   if (cardTruncated) {
@@ -196,18 +204,29 @@ export function drawPanel(
   }
   const cardHeight = card !== null ? cardShown.length : 0;
 
-  const transcriptTop = rect.row + 1;
-  const available = Math.max(0, contentEnd - cardHeight - rect.row);
+  const available = Math.max(0, contentEnd + 1 - cardHeight - rect.row);
 
-  const lines: string[] = [];
+  const lines: { text: string; sgr: string }[] = [];
   for (const entry of transcript) {
-    for (const segment of `${entry.who}: ${entry.text}`.split('\n')) {
-      lines.push(...wrapLine(escapeControl(segment), innerCols));
+    const [lead, sgr] =
+      entry.who === 'you'
+        ? ['❯ ', DIM]
+        : entry.who === 'tool'
+          ? ['· ', DIM]
+          : entry.who === 'note'
+            ? ['', DIM]
+            : entry.who === 'error'
+              ? ['', ERROR]
+              : ['', color];
+    for (const segment of `${lead}${entry.text}`.split('\n')) {
+      if (entry.who === 'agent' && segment.trim() === '') continue;
+      for (const text of wrapLine(escapeControl(segment), innerCols)) lines.push({ text, sgr });
     }
   }
   const shown = lines.slice(Math.max(0, lines.length - available));
+  const transcriptTop = contentEnd + 1 - cardHeight - shown.length;
   for (let i = 0; i < shown.length; i += 1) {
-    writeRun(transcriptTop + i, innerCol, shown[i]!, '', innerCols);
+    writeRun(transcriptTop + i, innerCol, shown[i]!.text, shown[i]!.sgr, innerCols);
   }
 
   if (card !== null) {
@@ -219,16 +238,19 @@ export function drawPanel(
   }
 
   let endX = innerCol + promptWidth;
+  const labelSgr = focused ? `1;${color}` : DIM;
   for (let i = 0; i < inputLines.length; i += 1) {
     const row = inputTop + i;
-    if (i === 0) {
-      const x = writeRun(row, innerCol, PROMPT, '', innerCols);
-      endX = writeRun(row, x, inputLines[i]!, '', innerCols - promptWidth);
-    } else {
-      endX = writeRun(row, innerCol + promptWidth, inputLines[i]!, '', innerCols - promptWidth);
-    }
+    const x = i === 0 ? writeRun(row, innerCol, prompt, labelSgr, promptWidth) : innerCol + promptWidth;
+    endX = writeRun(row, x, inputLines[i]!, '', innerCols - promptWidth);
   }
 
-  const cursor = ui.focus === 'panel' ? { row: inputRow, col: endX } : null;
+  const status = ui.status ?? '';
+  const statusWidth = Array.from(status).length;
+  if (statusWidth > 0 && endX + 2 + statusWidth <= innerCol + innerCols) {
+    writeRun(inputRow, innerCol + innerCols - statusWidth, status, '33', statusWidth);
+  }
+
+  const cursor = focused ? { row: inputRow, col: endX } : null;
   return { cursor, cardTruncated, inputTruncated };
 }

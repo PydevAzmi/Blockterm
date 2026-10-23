@@ -29,7 +29,17 @@ test('--shell takes a path', () =>
   expect(parseArgs(['--shell', 'C:\\bash.exe'])).toEqual({ kind: 'run', shell: 'C:\\bash.exe' }));
 
 test('--shell without a path is an error', () =>
-  expect(parseArgs(['--shell'])).toEqual({ kind: 'error', message: '--shell needs a path' }));
+  expect(parseArgs(['--shell'])).toEqual({ kind: 'error', message: '--shell needs a shell name or path' }));
+
+test('-- passes the rest to the shell', () =>
+  expect(parseArgs(['--shell', 'bash', '--', '--login', '-i'])).toEqual({
+    kind: 'run',
+    shell: 'bash',
+    shellArgs: ['--login', '-i'],
+  }));
+
+test('-- without --shell is an error', () =>
+  expect(parseArgs(['--', '-l'])).toEqual({ kind: 'error', message: 'shell arguments after -- need --shell' }));
 
 test('unknown option is an error', () =>
   expect(parseArgs(['--nope'])).toEqual({ kind: 'error', message: 'unknown option: --nope' }));

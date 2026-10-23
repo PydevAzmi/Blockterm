@@ -1,22 +1,14 @@
 import { expect, test } from 'vitest';
 
-import xterm from '@xterm/headless';
-
 import { displayTokens, parseKeys } from '../../src/agent/keys.js';
 import { initialUi } from '../../src/focus.js';
 import type { PanelUi } from '../../src/focus.js';
-import { computeLayout } from '../../src/layout.js';
 import type { Cell } from '../../src/render/frame.js';
-import { FOOTER, composeFrame } from '../../src/render/frame.js';
 import { drawPanel } from '../../src/render/panel.js';
 import type { PanelView, Transcript } from '../../src/render/panel.js';
 
-const { Terminal } = xterm;
-
 const FRAME_COLS = 40;
-const RECT = { row: 1, col: 4, rows: 10, cols: 30 };
-const INNER_COL = 4;
-const INNER_COLS = 29;
+const RECT = { row: 2, col: 0, rows: 10, cols: 40 };
 const INPUT_ROW = RECT.row + RECT.rows - 1;
 
 function blank(): Cell[] {
@@ -30,39 +22,93 @@ function rowText(cs: Cell[], row: number): string {
     .join('');
 }
 
+function cellAt(cs: Cell[], row: number, col: number): Cell {
+  return cs[row * FRAME_COLS + col]!;
+}
+
 function ui(over: Partial<PanelView> = {}): PanelView {
   const base: PanelUi = { ...initialUi(), open: true, focus: 'panel' };
   return { ...base, ...over };
 }
 
-test('the title row shows the agent and model label', () => {
+test('the input line names the mode and model in parentheses', () => {
   const cs = blank();
-  const transcript: Transcript[] = [
-    { who: 'you', text: 'why' },
-    { who: 'agent', text: 'long text' },
-  ];
-  drawPanel(cs, FRAME_COLS, RECT, ui({ model: 'claude-haiku-5-5' }), transcript, null);
-  const title = rowText(cs, RECT.row).slice(INNER_COL);
-  expect(title).toContain('agent · claude-haiku-5-5');
+  drawPanel(cs, FRAME_COLS, RECT, ui({ model: 'deepseek-v4.1-flash' }), [], null);
+  expect(rowText(cs, INPUT_ROW).startsWith('(agent · deepseek-v4.1-flash) ❯ ')).toBe(true);
 });
 
-test('the title model label is escaped', () => {
+test('without a model the input line says (agent)', () => {
+  const cs = blank();
+  drawPanel(cs, FRAME_COLS, RECT, ui(), [], null);
+  expect(rowText(cs, INPUT_ROW).startsWith('(agent) ❯ ')).toBe(true);
+});
+
+test('the model label is escaped', () => {
   const cs = blank();
   drawPanel(cs, FRAME_COLS, RECT, ui({ model: 'a\x1bb' }), [], null);
-  const title = rowText(cs, RECT.row).slice(INNER_COL);
-  expect(title).toContain('agent · a\\x1bb');
+  expect(rowText(cs, INPUT_ROW)).toContain('(agent · a\\x1bb)');
   expect(cs.map(c => c.ch)).not.toContain('\x1b');
 });
 
-test('a long transcript line wraps within the inner width', () => {
+test('the label takes the agent color when focused and dims when not', () => {
+  const focused = blank();
+  drawPanel(focused, FRAME_COLS, RECT, ui({ color: '35' }), [], null);
+  expect(cellAt(focused, INPUT_ROW, 0).sgr).toBe('1;35');
+
+  const idle = blank();
+  drawPanel(idle, FRAME_COLS, RECT, ui({ focus: 'terminal', color: '35' }), [], null);
+  expect(cellAt(idle, INPUT_ROW, 0).sgr).toBe('2');
+});
+
+test('agent replies use the configured color, with no "agent:" prefix', () => {
   const cs = blank();
-  const long = 'x'.repeat(60);
-  drawPanel(cs, FRAME_COLS, RECT, ui({ model: 'm' }), [{ who: 'agent', text: long }], null);
-  const first = rowText(cs, RECT.row + 1).slice(INNER_COL, INNER_COL + INNER_COLS);
-  expect(first).toBe('agent: ' + 'x'.repeat(INNER_COLS - 'agent: '.length));
-  const second = rowText(cs, RECT.row + 2).slice(INNER_COL, INNER_COL + INNER_COLS);
-  expect(second).toBe('x'.repeat(INNER_COLS));
-  expect(cs[(RECT.row + 1) * FRAME_COLS + INNER_COL + INNER_COLS]!.ch).toBe('│');
+  drawPanel(cs, FRAME_COLS, RECT, ui({ color: '38;5;141' }), [{ who: 'agent', text: 'done' }], null);
+  const row = INPUT_ROW - 1;
+  expect(rowText(cs, row).trimEnd()).toBe('done');
+  expect(cellAt(cs, row, 0).sgr).toBe('38;5;141');
+});
+
+test('agent replies default to cyan', () => {
+  const cs = blank();
+  drawPanel(cs, FRAME_COLS, RECT, ui(), [{ who: 'agent', text: 'ok' }], null);
+  expect(cellAt(cs, INPUT_ROW - 1, 0).sgr).toBe('36');
+});
+
+test('the transcript sits right above the input line, newest last, roles styled', () => {
+  const cs = blank();
+  const transcript: Transcript[] = [
+    { who: 'you', text: 'why' },
+    { who: 'tool', text: 'read_screen' },
+    { who: 'agent', text: 'because\n\nreasons' },
+    { who: 'error', text: 'boom' },
+  ];
+  drawPanel(cs, FRAME_COLS, RECT, ui(), transcript, null);
+  const lines = [5, 4, 3, 2, 1].map(n => rowText(cs, INPUT_ROW - n).trimEnd());
+  expect(lines).toEqual(['❯ why', '· read_screen', 'because', 'reasons', 'boom']);
+  expect(cellAt(cs, INPUT_ROW - 1, 0).sgr).toBe('31');
+  expect(cellAt(cs, INPUT_ROW - 5, 0).sgr).toBe('2');
+});
+
+test('a long transcript line wraps across the full width', () => {
+  const cs = blank();
+  drawPanel(cs, FRAME_COLS, RECT, ui(), [{ who: 'agent', text: 'x'.repeat(60) }], null);
+  expect(rowText(cs, INPUT_ROW - 2)).toBe('x'.repeat(40));
+  expect(rowText(cs, INPUT_ROW - 1).trimEnd()).toBe('x'.repeat(20));
+});
+
+test('the panel draws no box characters', () => {
+  const cs = blank();
+  drawPanel(cs, FRAME_COLS, RECT, ui({ model: 'm' }), [{ who: 'agent', text: 'hi' }], null);
+  for (let r = RECT.row; r < RECT.row + RECT.rows; r += 1) {
+    expect(rowText(cs, r)).not.toMatch(/[┌┐└┘├┤│]/);
+  }
+});
+
+test('a status sits at the right end of the input line', () => {
+  const cs = blank();
+  drawPanel(cs, FRAME_COLS, RECT, ui({ status: 'agent busy' }), [], null);
+  expect(rowText(cs, INPUT_ROW).endsWith('agent busy')).toBe(true);
+  expect(cellAt(cs, INPUT_ROW, FRAME_COLS - 1).sgr).toBe('33');
 });
 
 test('the approval card is amber and shows key labels', () => {
@@ -75,7 +121,7 @@ test('the approval card is amber and shows key labels', () => {
   expect(text).toContain('Type into shell');
   expect(text).toContain('⏎ Enter');
   expect(text).toContain('y approve  e edit  n deny  a');
-  expect(text).toContain('allow for this task');
+  expect(text).toContain('task');
 });
 
 test('a long card payload wraps across rows without dropping characters', () => {
@@ -84,9 +130,8 @@ test('a long card payload wraps across rows without dropping characters', () => 
   const parsed = parseKeys('git commit -am "a fairly long commit message here"<Enter>');
   const tokens = parsed.ok ? displayTokens(parsed.tokens) : [];
   drawPanel(cs, FRAME_COLS, rect, ui({ model: 'm' }), [], { target: 'shell', tokens });
-  const inner = rect.col;
   const all = Array.from({ length: rect.rows }, (_, i) =>
-    rowText(cs, rect.row + i).slice(inner, inner + rect.cols - 1),
+    rowText(cs, rect.row + i).slice(rect.col, rect.col + rect.cols),
   ).join('');
   expect(all).toContain('git commit -am "a fairly long commit message here"');
   expect(all).toContain('⏎ Enter');
@@ -100,35 +145,9 @@ test('an oversized card is reported truncated and shows the edit/deny hint', () 
   const result = drawPanel(cs, FRAME_COLS, rect, ui({ model: 'm' }), [], { target: 'shell', tokens });
   expect(result.cardTruncated).toBe(true);
   const all = Array.from({ length: rect.rows }, (_, i) =>
-    rowText(cs, rect.row + i).slice(rect.col, rect.col + rect.cols - 1),
+    rowText(cs, rect.row + i).slice(rect.col, rect.col + rect.cols),
   ).join('');
   expect(all).toContain('too long to show — e to edit, n to deny, or widen the window');
-});
-
-test('the docked seam has a single border and keeps the outer border', () => {
-  const layout = computeLayout({ cols: 200, rows: 50 }, true);
-  expect(layout.panel.mode).toBe('docked');
-  const rect = layout.panel.rect!;
-  const mirror = new Terminal({
-    cols: layout.pty.cols,
-    rows: layout.pty.rows,
-    allowProposedApi: true,
-  });
-  const frame = composeFrame(
-    mirror,
-    layout,
-    { title: 'blockterm', footer: FOOTER, view: 'fullscreen' },
-    true,
-  );
-  drawPanel(frame.cells, frame.cols, rect, ui({ model: 'm' }), [], null);
-  const row = 5;
-  const text = frame.cells
-    .slice(row * frame.cols, (row + 1) * frame.cols)
-    .map(c => c.ch)
-    .join('');
-  const seam = text.slice(layout.origin.col + layout.pty.cols, rect.col + 1);
-  expect((seam.match(/│/g) ?? []).length).toBe(1);
-  expect(text[frame.cols - 1]).toBe('│');
 });
 
 test('transcript control characters are escaped, not written raw', () => {
@@ -160,20 +179,12 @@ test('input and card target control characters are escaped', () => {
 test('a wrapped input is drawn across rows without dropping characters', () => {
   const cs = blank();
   const rect = { row: 1, col: 2, rows: 10, cols: 16 };
-  const result = drawPanel(
-    cs,
-    FRAME_COLS,
-    rect,
-    ui({ input: 'abcdefghijklmnopqrstuvwxyz' }),
-    [],
-    null,
-  );
+  const result = drawPanel(cs, FRAME_COLS, rect, ui({ input: 'abcdefghijklmnopqrstuvwxyz' }), [], null);
   expect(result.inputTruncated).toBe(false);
   const all = Array.from({ length: rect.rows }, (_, i) =>
-    rowText(cs, rect.row + i).slice(rect.col),
+    rowText(cs, rect.row + i).slice(rect.col + 10, rect.col + rect.cols),
   ).join('');
-  expect(all).toContain('abcdefghijklm');
-  expect(all).toContain('xyz');
+  expect(all.replace(/ /g, '')).toBe('abcdefghijklmnopqrstuvwxyz');
 });
 
 test('an input too long for the panel is reported truncated', () => {
@@ -189,11 +200,11 @@ test('an input that fits is not truncated', () => {
   expect(result.inputTruncated).toBe(false);
 });
 
-test('returns the cursor after the input prompt when focused', () => {
+test('returns the cursor after the input when focused', () => {
   const cs = blank();
   const result = drawPanel(cs, FRAME_COLS, RECT, ui({ input: 'hi' }), [], null);
-  expect(result.cursor).toEqual({ row: INPUT_ROW, col: INNER_COL + 4 });
-  expect(rowText(cs, INPUT_ROW).slice(INNER_COL)).toContain('❯ hi');
+  expect(result.cursor).toEqual({ row: INPUT_ROW, col: '(agent) ❯ hi'.length });
+  expect(rowText(cs, INPUT_ROW)).toContain('(agent) ❯ hi');
 });
 
 test('returns no cursor when the terminal has focus', () => {

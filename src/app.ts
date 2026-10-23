@@ -14,7 +14,7 @@ import { snapText } from './agent/tools.js';
 import type { ToolContext } from './agent/tools.js';
 import { BlockStore } from './blocks/store.js';
 import { copyText } from './clipboard.js';
-import { configPath, loadConfig as readConfigFile } from './config.js';
+import { colorSgr, configPath, loadConfig as readConfigFile } from './config.js';
 import type { Config, LoadResult } from './config.js';
 import { initialUi, reduce } from './focus.js';
 import type { Action } from './focus.js';
@@ -36,6 +36,7 @@ import type { CardView, Transcript } from './render/panel.js';
 import { createFrameScheduler, createRunningTicker } from './render/schedule.js';
 import { moveSelection, selectionKey } from './selection.js';
 import type { SelectionKey } from './selection.js';
+import { shellName } from './shell.js';
 import type { ShellChoice } from './shell.js';
 import { inject } from './shellint/inject.js';
 import { hostModeDiff, hostModesFrom, trackModes } from './term/modes.js';
@@ -88,6 +89,8 @@ export async function runApp(o: {
 
     const loaded = load();
     const config: Config | null = loaded.ok ? loaded.config : null;
+    const agentColor = colorSgr(config?.agentColor ?? null);
+    const mode = shellName(shell.file);
     let model: LanguageModel | null = null;
     let modelLabel: string | undefined = config?.model;
     let missingKeyEnv: string | null = null;
@@ -184,6 +187,7 @@ export async function runApp(o: {
         session.mirror,
         layout,
         {
+          mode,
           title: headerText({
             folder: store.cwd,
             home: homedir(),
@@ -239,15 +243,12 @@ export async function runApp(o: {
           }
         }
       }
-      const overlay = layout.panel.mode === 'overlay';
-      const drawPanelNow =
-        layout.panel.mode !== 'hidden' && layout.panel.rect !== null && (!overlay || ui.focus === 'panel');
-      if (drawPanelNow) {
+      if (layout.panel.rect !== null) {
         const panel = drawPanel(
           frame.cells,
           frame.cols,
-          layout.panel.rect!,
-          { ...ui, model: modelLabel },
+          layout.panel.rect,
+          { ...ui, model: modelLabel, color: agentColor, status: footerStatus },
           transcript,
           card,
         );
@@ -291,11 +292,7 @@ export async function runApp(o: {
         cardVisibleAt = null;
         inputVisibleAt = null;
       }
-      const hostModes = hostModesFrom(
-        session.mirror,
-        trackedModes,
-        session.view === 'blocks' && store.integrated,
-      );
+      const hostModes = hostModesFrom(session.mirror, trackedModes);
       const out = hostModeDiff(lastHostModes, hostModes) + renderDiff(lastFrame, frame);
       if (out !== '') stdout.write(out);
       lastHostModes = hostModes;
@@ -354,64 +351,6 @@ export async function runApp(o: {
       if (event.type === 'page-key' && session.view === 'blocks' && store.integrated) {
         scrollBy(event.direction === 'up' ? layout.pty.rows - 1 : -(layout.pty.rows - 1));
         return;
-      }
-
-      if (
-        event.type === 'mouse' &&
-        session.view === 'blocks' &&
-        store.integrated &&
-        session.mirror.modes.mouseTrackingMode === 'none'
-      ) {
-        const rect = layout.panel.rect;
-        const overPanel =
-          rect !== null &&
-          event.row >= rect.row &&
-          event.row < rect.row + rect.rows &&
-          event.col >= rect.col &&
-          event.col < rect.col + rect.cols;
-        const x = event.col - layout.origin.col;
-        const y = event.row - layout.origin.row;
-        const inPty = x >= 0 && x < layout.pty.cols && y >= 0 && y < layout.pty.rows;
-        if (!overPanel && inPty) {
-          if (event.action === 'press' && event.button === 0) {
-            const hit = lastFrame?.blockActions?.find(
-              action =>
-                event.row === action.row &&
-                event.col >= action.col &&
-                event.col < action.col + action.width,
-            );
-            if (hit !== undefined) {
-              explainBlock(hit.blockId);
-              return;
-            }
-            const frame = lastFrame;
-            if (
-              ui.focus === 'terminal' &&
-              hash === null &&
-              frame?.blockRows !== undefined &&
-              frame.blocksDocHeight !== undefined
-            ) {
-              const max = Math.max(0, frame.blocksDocHeight - layout.pty.rows);
-              const current = Math.min(Math.max(0, scroll), max);
-              const start = Math.max(0, frame.blocksDocHeight - layout.pty.rows - current);
-              const docRow = start + y;
-              const block = frame.blockRows.find(
-                candidate => docRow >= candidate.top && docRow < candidate.top + candidate.height,
-              );
-              if (block !== undefined) {
-                selected = block.id;
-                revealSelected = true;
-                clearSelectionNotice();
-                requestRender();
-                return;
-              }
-            }
-          }
-          const wheel = event.button & ~(4 | 8 | 16);
-          if (wheel === 64) scrollBy(3);
-          else if (wheel === 65) scrollBy(-3);
-          return;
-        }
       }
 
       if (
@@ -967,18 +906,6 @@ export async function runApp(o: {
         for (const action of result.actions) runAction(action);
         requestRender();
         return;
-      }
-      if (event.type === 'mouse' && ui.focus === 'panel' && layout.panel.mode === 'overlay') {
-        const rect = layout.panel.rect;
-        if (
-          rect !== null &&
-          event.row >= rect.row &&
-          event.row < rect.row + rect.rows &&
-          event.col >= rect.col &&
-          event.col < rect.col + rect.cols
-        ) {
-          return;
-        }
       }
       const now = Date.now();
       const quiet = now - lastKeyAt;

@@ -56,7 +56,7 @@ async function finishedBlock(o: {
   return { mirror, store };
 }
 
-test('finished block: border, status, duration, body and live prompt', async () => {
+test('finished block: header rule, status, duration, body and live prompt, no side borders', async () => {
   const { mirror, store } = await finishedBlock({
     command: 'ls',
     exitCode: 0,
@@ -65,34 +65,21 @@ test('finished block: border, status, duration, body and live prompt', async () 
   });
 
   const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
-  expect(result.docHeight).toBe(5);
-  expect(result.rows).toHaveLength(5);
+  expect(result.docHeight).toBe(4);
+  expect(result.rows).toHaveLength(4);
 
   const top = result.rows[0]!;
-  expect(rowText(top).startsWith('┌ $ ls ')).toBe(true);
-  expect(rowText(top).endsWith('✔ 0.81s ┐')).toBe(true);
+  expect(rowText(top).startsWith('$ ls ─')).toBe(true);
+  expect(rowText(top).endsWith('─ ✔ 0.81s')).toBe(true);
   expect(find(top, '✔').sgr).toBe('32');
+  expect(find(top, '─').sgr).toBe('2');
   expect(top).toHaveLength(40);
 
-  const first = result.rows[1]!;
-  expect(first[0]!.ch).toBe('│');
-  expect(first[1]!.ch).toBe('a');
-  expect(first[39]!.ch).toBe('│');
-  expect(rowText(first).slice(2, 38).trim()).toBe('');
-
-  const second = result.rows[2]!;
-  expect(second[0]!.ch).toBe('│');
-  expect(second[1]!.ch).toBe('b');
-  expect(second[39]!.ch).toBe('│');
-
-  expect(rowText(result.rows[3]!).startsWith('└')).toBe(true);
-  expect(rowText(result.rows[3]!).endsWith('┘')).toBe(true);
-
-  const prompt = result.rows[4]!;
-  expect(prompt[0]!.ch).toBe('│');
-  expect(prompt[1]!.ch).toBe('$');
-  expect(prompt[39]!.ch).toBe('│');
-  expect(result.cursor).toEqual({ row: 4, col: 3 });
+  expect(rowText(result.rows[1]!)).toBe('a'.padEnd(40));
+  expect(rowText(result.rows[2]!)).toBe('b'.padEnd(40));
+  expect(rowText(result.rows[3]!)).toBe('$'.padEnd(40));
+  expect(result.cursor).toEqual({ row: 3, col: 2 });
+  for (const row of result.rows) expect(rowText(row)).not.toMatch(/[┌┐└┘│]/);
 });
 
 test('hash input replaces the bottom live row and puts the cursor at its end', async () => {
@@ -108,12 +95,10 @@ test('hash input replaces the bottom live row and puts the cursor at its end', a
     5000,
   );
 
-  const prompt = result.rows[4]!;
-  expect(prompt[0]!.ch).toBe('│');
-  expect(prompt[39]!.ch).toBe('│');
-  expect(rowText(prompt)).toContain('# list big files');
+  const prompt = result.rows[3]!;
+  expect(rowText(prompt).startsWith('# list big files')).toBe(true);
   expect(rowText(prompt)).not.toContain('$');
-  expect(result.cursor).toEqual({ row: 4, col: 17 });
+  expect(result.cursor).toEqual({ row: 3, col: 16 });
 
   const noCursor = composeBlocks(
     mirror,
@@ -132,62 +117,7 @@ test('failed block: exit code in the fail colour', async () => {
   expect(find(top, '✘').sgr).toBe('31');
 });
 
-test('failed block: bottom border shows [Explain error] and reports its hit box', async () => {
-  const { mirror, store } = await finishedBlock({
-    command: 'npm test',
-    exitCode: 1,
-    body: 'boom',
-    after: '\x1b]133;A\x07$ ',
-  });
-  const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
-  const bottom = result.rows.findIndex(row => rowText(row).startsWith('└'));
-
-  expect(bottom).toBeGreaterThan(0);
-  expect(rowText(result.rows[bottom]!).startsWith('└ [Explain error] ─')).toBe(true);
-  expect(result.actions).toEqual([
-    { row: bottom, col: 2, width: 15, blockId: store.blocks[0]!.id, kind: 'explain' },
-  ]);
-});
-
-test('successful block: plain bottom border and no action', async () => {
-  const { mirror, store } = await finishedBlock({
-    command: 'npm test',
-    exitCode: 0,
-    body: 'ok',
-    after: '\x1b]133;A\x07$ ',
-  });
-  const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
-  const bottom = result.rows.findIndex(row => rowText(row).startsWith('└'));
-
-  expect(rowText(result.rows[bottom]!).startsWith('└─')).toBe(true);
-  expect(result.actions).toEqual([]);
-});
-
-test('failed block with a null exit code also gets the label', async () => {
-  const mirror = makeMirror(40, 12);
-  const store = new BlockStore(mirror, () => 1000);
-  await write(mirror, '\x1b]133;B\x07sleep\r\n\x1b]133;C\x07partial\r\n\x1b]133;A\x07$ ');
-
-  const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 2000);
-  const bottom = result.rows.findIndex(row => rowText(row).startsWith('└'));
-  expect(rowText(result.rows[bottom]!).startsWith('└ [Explain error] ─')).toBe(true);
-  expect(result.actions).toHaveLength(1);
-});
-
-test('a label scrolled out of view has no action', async () => {
-  const lines = Array.from({ length: 20 }, (_, i) => `L${String(i + 1).padStart(2, '0')}`).join('\r\n');
-  const { mirror, store } = await finishedBlock({
-    command: 'seq',
-    exitCode: 1,
-    body: lines,
-    after: '\x1b]133;A\x07$ ',
-  });
-
-  const result = composeBlocks(mirror, { store, scroll: 9999 }, { cols: 40, rows: 10 }, 5000);
-  expect(result.actions).toEqual([]);
-});
-
-test('the selected block borders are bold cyan and the rows are not cached', async () => {
+test('the selected block header is reverse cyan, its output untouched, and nothing is cached', async () => {
   const { mirror, store } = await finishedBlock({
     command: 'ls',
     body: 'a\r\nb',
@@ -197,41 +127,13 @@ test('the selected block borders are bold cyan and the rows are not cached', asy
   const view = { store, scroll: 0, selected: id };
   const selected = composeBlocks(mirror, view, { cols: 40, rows: 12 }, 5000);
 
-  expect(selected.rows[0]![0]!.sgr).toBe('1;36');
-  expect(selected.rows[0]![39]!.sgr).toBe('1;36');
-  expect(selected.rows[1]![0]!.sgr).toBe('1;36');
-  expect(selected.rows[1]![39]!.sgr).toBe('1;36');
-  expect(selected.rows[1]![1]!.sgr).toBe('');
-  expect(selected.rows[3]![0]!.sgr).toBe('1;36');
+  expect(selected.rows[0]!.every(cell => cell.sgr === '1;7;36')).toBe(true);
+  expect(selected.rows[1]![0]!.sgr).toBe('');
 
   const plain = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
-  expect(plain.rows[0]![0]!.sgr).toBe('');
+  expect(plain.rows[0]![0]!.sgr).toBe('1');
   expect(plain.rows[1]![0]!.sgr).toBe('');
   expect(find(plain.rows[0]!, '✔').sgr).toBe('32');
-});
-
-test('highlight marks only the outline, not box-drawing output inside the block', async () => {
-  const { mirror, store } = await finishedBlock({
-    command: 'tree',
-    body: '│ tree │\r\nafter',
-    after: '\x1b]133;A\x07$ ',
-  });
-  const id = store.blocks[0]!.id;
-  const selected = composeBlocks(mirror, { store, scroll: 0, selected: id }, { cols: 40, rows: 12 }, 5000);
-  const bottom = selected.rows.findIndex(row => rowText(row).startsWith('└'));
-
-  expect(selected.rows[0]!.every(cell => cell.sgr === '1;36')).toBe(true);
-  expect(selected.rows[1]![0]!.sgr).toBe('1;36');
-  expect(selected.rows[1]![39]!.sgr).toBe('1;36');
-  expect(selected.rows[1]![1]!.ch).toBe('│');
-  expect(selected.rows[1]![1]!.sgr).toBe('');
-  expect(selected.rows[1]![8]!.ch).toBe('│');
-  expect(selected.rows[1]![8]!.sgr).toBe('');
-  expect(selected.rows[bottom]!.every(cell => cell.sgr === '1;36')).toBe(true);
-
-  const plain = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
-  expect(plain.rows[0]![0]!.sgr).toBe('');
-  expect(plain.rows[1]![1]!.sgr).toBe('');
 });
 
 test('blockRows reports each block top and height in document rows', async () => {
@@ -242,56 +144,10 @@ test('blockRows reports each block top and height in document rows', async () =>
   });
   const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
 
-  expect(result.blockRows).toEqual([{ id: store.blocks[0]!.id, top: 0, height: 4 }]);
+  expect(result.blockRows).toEqual([{ id: store.blocks[0]!.id, top: 0, height: 3 }]);
 });
 
-test('the label is omitted when the inner width is under 17', async () => {
-  const { mirror, store } = await finishedBlock({
-    command: 'npm test',
-    exitCode: 1,
-    body: 'boom',
-    cols: 18,
-    after: '\x1b]133;A\x07$ ',
-  });
-  const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 18, rows: 12 }, 5000);
-  const bottom = result.rows.findIndex(row => rowText(row).startsWith('└'));
-
-  expect(rowText(result.rows[bottom]!).startsWith('└─')).toBe(true);
-  expect(result.actions).toEqual([]);
-});
-
-test('composeFrame translates the explain hit box to host coordinates', async () => {
-  const { mirror, store } = await finishedBlock({
-    command: 'npm test',
-    exitCode: 1,
-    body: 'boom',
-    after: '\x1b]133;A\x07$ ',
-  });
-  const layout = computeLayout({ cols: 40, rows: 12 });
-  const frame = composeFrame(
-    mirror,
-    layout,
-    {
-      title: 'blockterm',
-      footer: FOOTER,
-      view: 'blocks',
-      blocks: { store, scroll: 0 },
-    },
-    true,
-  );
-
-  expect(frame.blockActions).toEqual([
-    {
-      row: 3,
-      col: layout.origin.col - 1 + 2,
-      width: 15,
-      blockId: store.blocks[0]!.id,
-      kind: 'explain',
-    },
-  ]);
-});
-
-test('long command is truncated without overflowing the border', async () => {
+test('long command is truncated and the status stays on the row', async () => {
   const { mirror, store } = await finishedBlock({
     command: 'x'.repeat(80),
     body: '',
@@ -301,36 +157,34 @@ test('long command is truncated without overflowing the border', async () => {
   const top = result.rows[0]!;
   expect(top).toHaveLength(40);
   expect(rowText(top)).toContain('…');
-  expect(top[39]!.ch).toBe('┐');
+  expect(rowText(top).endsWith('✔ 0.81s')).toBe(true);
 });
 
 test('reflow: wrapped lines re-wrap by cell width and keep wide chars whole', async () => {
-  const line = 'a'.repeat(17) + '世' + 'a'.repeat(41);
+  const line = 'a'.repeat(19) + '世' + 'a'.repeat(39);
   const { mirror, store } = await finishedBlock({ command: 'long', body: line });
   const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 20, rows: 12 }, 5000);
 
   expect(result.rows.length).toBeGreaterThan(2);
   for (const row of result.rows) expect(row).toHaveLength(20);
-  for (const row of result.rows.slice(1, -1)) {
-    expect(row[0]!.ch).toBe('│');
-    expect(row[19]!.ch).toBe('│');
-    for (let i = 1; i <= 18; i += 1) {
+  for (const row of result.rows.slice(1)) {
+    for (let i = 0; i < 20; i += 1) {
       const cell = row[i]!;
       if (cell.width === 2) {
-        expect(i).toBeLessThan(18);
+        expect(i).toBeLessThan(19);
         expect(row[i + 1]!.width).toBe(0);
       }
     }
   }
 
   const firstBody = result.rows[1]!;
-  expect(rowText(firstBody).slice(1, 18)).toBe('a'.repeat(17));
-  expect(firstBody[18]!.ch).toBe(' ');
+  expect(rowText(firstBody).slice(0, 19)).toBe('a'.repeat(19));
+  expect(firstBody[19]!.ch).toBe(' ');
 
   const secondBody = result.rows[2]!;
-  expect(secondBody[1]!.ch).toBe('世');
-  expect(secondBody[1]!.width).toBe(2);
-  expect(secondBody[2]!.width).toBe(0);
+  expect(secondBody[0]!.ch).toBe('世');
+  expect(secondBody[0]!.width).toBe(2);
+  expect(secondBody[1]!.width).toBe(0);
 });
 
 test('tall block shows head, marker and tail', async () => {
@@ -340,12 +194,11 @@ test('tall block shows head, marker and tail', async () => {
   await write(mirror, `\x1b]133;B\x07seq\r\n\x1b]133;C\x07${body}\r\n\x1b]133;D;0\x07`);
 
   const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 10 }, 5000);
-  expect(result.rows).toHaveLength(10);
-  expect(rowText(result.rows[0]!).startsWith('┌ $ seq ')).toBe(true);
+  expect(result.rows).toHaveLength(9);
+  expect(rowText(result.rows[0]!).startsWith('$ seq ')).toBe(true);
   expect(rowText(result.rows[1]!)).toContain('1');
   expect(rowText(result.rows[5]!)).toContain('… 93 lines …');
   expect(rowText(result.rows[8]!)).toContain('100');
-  expect(rowText(result.rows[9]!).startsWith('└')).toBe(true);
 });
 
 test('scroll: five rows up from the bottom and the cursor scrolls away', async () => {
@@ -357,14 +210,14 @@ test('scroll: five rows up from the bottom and the cursor scrolls away', async (
   });
 
   const bottom = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 10 }, 5000);
-  expect(bottom.docHeight).toBe(23);
+  expect(bottom.docHeight).toBe(22);
   expect(bottom.cursor).not.toBeNull();
 
   const up = composeBlocks(mirror, { store, scroll: 5 }, { cols: 40, rows: 10 }, 5000);
-  expect(up.docHeight).toBe(23);
+  expect(up.docHeight).toBe(22);
   expect(up.rows).toHaveLength(10);
-  expect(rowText(up.rows[0]!)).toContain('L08');
-  expect(rowText(up.rows[9]!)).toContain('L17');
+  expect(rowText(up.rows[0]!)).toContain('L07');
+  expect(rowText(up.rows[9]!)).toContain('L16');
   expect(up.cursor).toBeNull();
 });
 
@@ -380,8 +233,8 @@ test('running block: header above the live rows with elapsed time and no status 
   expect(result.docHeight).toBe(2);
 
   const header = result.rows[result.rows.length - 2]!;
-  expect(rowText(header).startsWith('┌ $ sleep 5')).toBe(true);
-  expect(rowText(header).endsWith('2.50s ┐')).toBe(true);
+  expect(rowText(header).startsWith('$ sleep 5')).toBe(true);
+  expect(rowText(header).endsWith('2.50s')).toBe(true);
   expect(rowText(header)).not.toContain('✔');
   expect(rowText(header)).not.toContain('✘');
 });
@@ -394,7 +247,7 @@ test('duration formatting: 12.3s and 1m05s', async () => {
     { cols: 40, rows: 12 },
     5000,
   );
-  expect(rowText(shortResult.rows[0]!).endsWith('12.3s ┐')).toBe(true);
+  expect(rowText(shortResult.rows[0]!).endsWith('12.3s')).toBe(true);
 
   const long = await finishedBlock({ elapsed: 65000 });
   const longResult = composeBlocks(
@@ -403,7 +256,7 @@ test('duration formatting: 12.3s and 1m05s', async () => {
     { cols: 40, rows: 12 },
     5000,
   );
-  expect(rowText(longResult.rows[0]!).endsWith('1m05s ┐')).toBe(true);
+  expect(rowText(longResult.rows[0]!).endsWith('1m05s')).toBe(true);
 });
 
 test('block with a null exit code shows ✘ ?', async () => {
@@ -421,8 +274,8 @@ test('scroll larger than maxScroll clamps to the top', async () => {
   const { mirror, store } = await finishedBlock({ command: 'seq', body: lines, after: '\x1b]133;A\x07$ ' });
 
   const result = composeBlocks(mirror, { store, scroll: 9999 }, { cols: 40, rows: 10 }, 5000);
-  expect(result.docHeight).toBe(23);
-  expect(rowText(result.rows[0]!)).toContain('┌');
+  expect(result.docHeight).toBe(22);
+  expect(rowText(result.rows[0]!).startsWith('$ seq')).toBe(true);
   expect(result.cursor).toBeNull();
 });
 
@@ -440,8 +293,8 @@ test('wrapped line: a written space at the wrap point survives reflow', async ()
 
   const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 20, rows: 12 }, 5000);
   const joined = result.rows
-    .slice(1, -1)
-    .map(row => rowText(row).slice(1, 19).trimEnd())
+    .slice(1)
+    .map(row => rowText(row))
     .join('');
   expect(joined).toContain('a b');
 });
@@ -474,7 +327,7 @@ test('live region: 5000 rows keep the full doc height but only the window is rea
   expect(result.rows).toHaveLength(10);
   expect(rowText(result.rows[8]!)).toContain('L4999');
   expect(rowText(result.rows[9]!)).toContain('L5000');
-  expect(result.cursor).toEqual({ row: 9, col: 6 });
+  expect(result.cursor).toEqual({ row: 9, col: 5 });
 });
 
 test('frame uses chrome.now for the running header', async () => {
@@ -499,7 +352,7 @@ test('frame uses chrome.now for the running header', async () => {
   );
 
   let header = '';
-  for (let col = 1; col <= 38; col += 1) header += frame.cells[1 * 40 + col]!.ch;
+  for (let col = 0; col < 40; col += 1) header += frame.cells[col]!.ch;
   expect(header).toContain('2.50s');
 });
 
@@ -522,11 +375,9 @@ test('frame uses the blocks renderer only when the store is integrated', async (
     true,
   );
 
-  expect(frame.cells[1 * 40 + 1]!.ch).toBe('┌');
-  expect(frame.cells[1 * 40]!.ch).toBe('│');
-  expect(frame.cells[1 * 40 + 39]!.ch).toBe('│');
-  expect(frame.cells[2 * 40 + 2]!.ch).toBe('a');
-  expect(frame.cursor).toEqual({ row: 5, col: 4, visible: true });
+  expect(frame.cells[0]!.ch).toBe('$');
+  expect(frame.cells[1 * 40]!.ch).toBe('a');
+  expect(frame.cursor).toEqual({ row: 3, col: 2, visible: true });
 });
 
 test('slice 1 unchanged when the store is not integrated', async () => {

@@ -17,39 +17,23 @@ export interface BlockRow {
   height: number;
 }
 
-export interface BlockAction {
-  row: number;
-  col: number;
-  width: number;
-  blockId: number;
-  kind: 'explain';
-}
-
 export interface BlocksResult {
   rows: Cell[][];
   cursor: { row: number; col: number } | null;
   docHeight: number;
-  actions: BlockAction[];
   blockRows: BlockRow[];
 }
 
-const EXPLAIN_LABEL = '[Explain error]';
-const EXPLAIN_WIDTH = 15;
-const SELECTED_SGR = '1;36';
+const SELECTED_SGR = '1;7;36';
+const RULE_SGR = '2';
 
 function blank(sgr = ''): Cell {
   return { ch: ' ', width: 1, sgr };
 }
 
-function highlightRow(row: Cell[], index: number, last: number): Cell[] {
-  if (index === 0 || index === last) return row.map(cell => ({ ...cell, sgr: SELECTED_SGR }));
-  const out = row.slice();
-  const left = out[0];
-  if (left !== undefined) out[0] = { ...left, sgr: SELECTED_SGR };
-  const rightIndex = out.length - 1;
-  const right = out[rightIndex];
-  if (right !== undefined) out[rightIndex] = { ...right, sgr: SELECTED_SGR };
-  return out;
+function highlightRow(row: Cell[], index: number): Cell[] {
+  if (index !== 0) return row;
+  return row.map(cell => ({ ...cell, sgr: SELECTED_SGR }));
 }
 
 function charWidth(ch: string): 1 | 2 {
@@ -121,47 +105,25 @@ function topBorder(block: Block, cols: number, now: number): Cell[] {
   const elapsed = (block.endedAt ?? now) - block.startedAt;
   const duration = durationText(elapsed);
   let status: string;
-  if (block.exitCode === null) status = running ? ` ${duration} ` : ` ✘ ? ${duration} `;
-  else if (block.exitCode === 0) status = ` ✔ ${duration} `;
-  else status = ` ✘ ${block.exitCode} ${duration} `;
+  if (block.exitCode === null) status = running ? ` ${duration}` : ` ✘ ? ${duration}`;
+  else if (block.exitCode === 0) status = ` ✔ ${duration}`;
+  else status = ` ✘ ${block.exitCode} ${duration}`;
 
   const statusWidth = textWidth(status);
-  const maxPrefix = Math.max(0, cols - statusWidth - 1);
+  const maxPrefix = Math.max(0, cols - statusWidth);
   const command = block.command.replace(/[\r\n\t]/g, ' ');
-  let prefix = `┌ $ ${command} `;
+  let prefix = `$ ${command} `;
   if (textWidth(prefix) > maxPrefix) {
-    prefix = `┌ $ ${truncateText(command, maxPrefix - 5)} `;
+    prefix = `$ ${truncateText(command, maxPrefix - 3)} `;
   }
   if (textWidth(prefix) > maxPrefix) prefix = truncateText(prefix, maxPrefix);
 
   const row: Cell[] = [];
-  pushText(row, prefix);
-  const fill = Math.max(0, cols - textWidth(prefix) - statusWidth - 1);
-  pushText(row, '─'.repeat(fill));
-  const sgr = block.exitCode === null ? '' : block.exitCode === 0 ? '32' : '31';
+  pushText(row, prefix, '1');
+  const fill = Math.max(0, cols - textWidth(prefix) - statusWidth);
+  pushText(row, '─'.repeat(fill), RULE_SGR);
+  const sgr = block.exitCode === null ? RULE_SGR : block.exitCode === 0 ? '32' : '31';
   pushText(row, status, sgr);
-  pushText(row, '┐');
-  return fitRow(row, cols);
-}
-
-function bottomBorder(block: Block, cols: number, inner: number): Cell[] {
-  const row: Cell[] = [];
-  if (block.exitCode !== 0 && inner >= EXPLAIN_WIDTH + 2) {
-    pushText(row, `└ ${EXPLAIN_LABEL} `);
-    pushText(row, '─'.repeat(Math.max(0, cols - row.length - 1)));
-  } else {
-    pushText(row, '└');
-    pushText(row, '─'.repeat(Math.max(0, cols - 2)));
-  }
-  pushText(row, '┘');
-  return fitRow(row, cols);
-}
-
-function bordered(inner: Cell[], cols: number): Cell[] {
-  const row: Cell[] = [];
-  pushText(row, '│');
-  row.push(...inner);
-  pushText(row, '│');
   return fitRow(row, cols);
 }
 
@@ -227,7 +189,7 @@ function reflow(lines: SnapLine[], inner: number): Cell[][] {
 
 function cappedBody(block: Block, cols: number, inner: number, areaRows: number): Cell[][] {
   const body = reflow(block.lines, inner);
-  if (body.length <= areaRows * 2) return body.map(row => bordered(row, cols));
+  if (body.length <= areaRows * 2) return body.map(row => fitRow(row, cols));
 
   const content = Math.max(0, areaRows - 3);
   const head = Math.ceil(content / 2);
@@ -237,7 +199,7 @@ function cappedBody(block: Block, cols: number, inner: number, areaRows: number)
   for (let i = 0; i < head; i += 1) shown.push(body[i]!);
   shown.push(markerRow(inner, omitted));
   for (let i = 0; i < tail; i += 1) shown.push(body[body.length - tail + i]!);
-  return shown.map(row => bordered(row, cols));
+  return shown.map(row => fitRow(row, cols));
 }
 
 function liveRow(mirror: Terminal, row: number, inner: number): Cell[] {
@@ -258,14 +220,13 @@ function liveRow(mirror: Terminal, row: number, inner: number): Cell[] {
     }
     cells.push(copied);
   }
-  return bordered(cells, inner + 2);
+  return fitRow(cells, inner);
 }
 
 interface CachedBlock {
   inner: number;
   areaRows: number;
   rows: Cell[][];
-  actions: BlockAction[];
 }
 
 const blockCache = new WeakMap<Block, CachedBlock>();
@@ -285,24 +246,8 @@ function cachedRows(
   const hit = blockCache.get(block);
   if (hit !== undefined && hit.inner === inner && hit.areaRows === areaRows) return hit;
 
-  const rows = [
-    topBorder(block, cols, block.endedAt ?? now),
-    ...cappedBody(block, cols, inner, areaRows),
-    bottomBorder(block, cols, inner),
-  ];
-  const actions: BlockAction[] =
-    block.exitCode !== 0 && inner >= EXPLAIN_WIDTH + 2
-      ? [
-          {
-            row: rows.length - 1,
-            col: 2,
-            width: EXPLAIN_WIDTH,
-            blockId: block.id,
-            kind: 'explain',
-          },
-        ]
-      : [];
-  const cached = { inner, areaRows, rows, actions };
+  const rows = [topBorder(block, cols, block.endedAt ?? now), ...cappedBody(block, cols, inner, areaRows)];
+  const cached = { inner, areaRows, rows };
   if (block.endedAt !== null) blockCache.set(block, cached);
   return cached;
 }
@@ -314,22 +259,17 @@ export function composeBlocks(
   now: number,
 ): BlocksResult {
   const cols = area.cols;
-  const inner = Math.max(0, cols - 2);
+  const inner = cols;
   const buffer = mirror.buffer.active;
   const running = view.store.running;
 
-  const sections: {
-    start: number;
-    rows: Cell[][];
-    actions: BlockAction[];
-    selected: boolean;
-  }[] = [];
+  const sections: { start: number; rows: Cell[][]; selected: boolean }[] = [];
   const blockRows: BlockRow[] = [];
   let docHeight = 0;
   for (const block of view.store.blocks) {
     const cached = cachedRows(block, cols, inner, area.rows, now);
     const selected = view.selected === block.id;
-    sections.push({ start: docHeight, rows: cached.rows, actions: cached.actions, selected });
+    sections.push({ start: docHeight, rows: cached.rows, selected });
     blockRows.push({ id: block.id, top: docHeight, height: cached.rows.length });
     docHeight += cached.rows.length;
   }
@@ -375,18 +315,12 @@ export function composeBlocks(
       const row: Cell[] = [];
       pushText(row, text);
       while (row.length < inner) row.push(blank());
-      hashRow = bordered(row, cols);
+      hashRow = fitRow(row, cols);
       cursorDoc = hash.cursor
-        ? {
-            row: hashDocRow,
-            col: Math.min(1 + textWidth(text), Math.max(0, cols - 2)),
-          }
+        ? { row: hashDocRow, col: Math.min(textWidth(text), Math.max(0, cols - 1)) }
         : null;
     } else {
-      cursorDoc = {
-        row: hashDocRow,
-        col: Math.min(1 + buffer.cursorX, Math.max(0, cols - 2)),
-      };
+      cursorDoc = { row: hashDocRow, col: Math.min(buffer.cursorX, Math.max(0, cols - 1)) };
     }
   }
 
@@ -409,7 +343,7 @@ export function composeBlocks(
     take(section.start, section.start + section.rows.length, offset => {
       const row = section.rows[offset];
       if (row === undefined || !section.selected) return row;
-      return highlightRow(row, offset, section.rows.length - 1);
+      return highlightRow(row, offset);
     });
   }
   if (liveHeader !== null) take(headerAt, headerAt + 1, () => liveHeader!);
@@ -426,15 +360,5 @@ export function composeBlocks(
       ? { row: cursorDoc.row - start, col: cursorDoc.col }
       : null;
 
-  const actions: BlockAction[] = [];
-  for (const section of sections) {
-    for (const action of section.actions) {
-      const docRow = section.start + action.row;
-      if (docRow >= start && docRow < end) {
-        actions.push({ ...action, row: docRow - start });
-      }
-    }
-  }
-
-  return { rows, cursor, docHeight, actions, blockRows };
+  return { rows, cursor, docHeight, blockRows };
 }
