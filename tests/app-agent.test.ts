@@ -740,3 +740,61 @@ test('shell exit mid-task resolves the exit code and aborts the task', async () 
   await until(() => model.doStreamCalls.at(-1)?.abortSignal?.aborted === true);
   expect(model.doStreamCalls.at(-1)?.abortSignal?.aborted).toBe(true);
 });
+
+test('F1 shows the help overlay, keys do not reach the pty, and Esc closes it', async () => {
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED });
+
+  stdin.emit('data', '\x1bOP');
+  await until(() => output(stdout).includes('blockterm keys'));
+  stdin.emit('data', 'x');
+  await wait(20);
+  expect(pty.written).toHaveLength(0);
+
+  stdin.emit('data', '\x1b');
+  await until(() => !output(stdout).includes('blockterm keys'));
+  stdin.emit('data', '\x1b');
+  await until(() => pty.written.some(w => String(w) === '\x1b'));
+
+  stdin.emit('data', '\x1b[11~');
+  await until(() => output(stdout).includes('blockterm keys'));
+  expect(output(stdout)).toContain('ctrl+k        agent panel / switch focus');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('closing help resets the approval gate before y counts', async () => {
+  vi.useFakeTimers();
+  try {
+    const model = sendKeysThenDone();
+    const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+    stdin.emit('data', '\x0b');
+    await vi.advanceTimersByTimeAsync(0);
+    stdin.emit('data', 'hello\r');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(output(stdout)).toContain('Type into');
+    await vi.advanceTimersByTimeAsync(450);
+
+    stdin.emit('data', '\x1bOP');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(output(stdout)).toContain('blockterm keys');
+
+    stdin.emit('data', '\x1b');
+    await vi.advanceTimersByTimeAsync(11);
+    stdin.emit('data', 'y');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(pty.written).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(450);
+    stdin.emit('data', 'y');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(pty.written.map(String).join('')).toContain('echo hi\r');
+
+    pty.exit(0);
+    await expect(run).resolves.toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});

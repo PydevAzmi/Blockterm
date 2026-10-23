@@ -281,3 +281,52 @@ test('page keys are dropped with panel focus', () => {
   const r = reduce(panel(), { type: 'page-key', direction: 'down', data: '\x1b[6;2~' });
   expect(r.actions).toEqual([]);
 });
+
+test('help-key opens help from any focus without actions', () => {
+  for (const state of [
+    initialUi(),
+    panel(),
+    withCard(),
+    { ...initialUi(), open: true, focus: 'panel' as const, mode: 'busy' as const },
+  ]) {
+    const r = reduce(state, { type: 'help-key' });
+    expect(r.ui.help).toBe(true);
+    expect(r.actions).toEqual([]);
+  }
+});
+
+test('while help is open other keys are dropped', () => {
+  const help = { ...panel({ input: 'ab' }), help: true };
+  const typed = reduce(help, bytes('cd'));
+  expect(typed.ui.help).toBe(true);
+  expect(typed.ui.input).toBe('ab');
+  expect(typed.actions).toEqual([]);
+
+  const terminalHelp = { ...initialUi(), help: true };
+  expect(reduce(terminalHelp, bytes('ls\r')).actions).toEqual([]);
+  expect(reduce(terminalHelp, { type: 'paste', text: 'x' }).actions).toEqual([]);
+  expect(reduce(terminalHelp, { type: 'page-key', direction: 'up', data: '\x1b[5;2~' }).actions).toEqual([]);
+  expect(
+    reduce(terminalHelp, { type: 'mouse', button: 0, col: 1, row: 1, action: 'press' }).actions,
+  ).toEqual([]);
+  expect(reduce(terminalHelp, { type: 'focus', focused: true }).actions).toEqual([]);
+});
+
+test('help-key or escape closes help', () => {
+  const help = { ...initialUi(), help: true };
+  expect(reduce(help, { type: 'help-key' }).ui.help).toBe(false);
+  expect(reduce(help, bytes('\x1b')).ui.help).toBe(false);
+  expect(reduce(help, bytes('\x1b')).actions).toEqual([]);
+});
+
+test('agent-key still toggles focus while help stays open', () => {
+  const help = { ...initialUi(), help: true };
+  const reopened = reduce(help, { type: 'agent-key' });
+  expect(reopened.ui.help).toBe(true);
+  expect(reopened.ui.open).toBe(true);
+  expect(reopened.ui.focus).toBe('panel');
+
+  const closed = reduce({ ...reopened.ui, focus: 'panel' }, { type: 'agent-key' });
+  expect(closed.ui.help).toBe(true);
+  expect(closed.ui.focus).toBe('terminal');
+});

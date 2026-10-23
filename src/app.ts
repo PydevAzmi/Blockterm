@@ -30,6 +30,7 @@ import { renderDiff } from './render/diff.js';
 import { FOOTER, composeFrame } from './render/frame.js';
 import type { Frame } from './render/frame.js';
 import { gitBranch, headerText } from './render/header.js';
+import { drawHelp } from './render/help.js';
 import { drawPanel } from './render/panel.js';
 import type { CardView, Transcript } from './render/panel.js';
 import { createFrameScheduler, createRunningTicker } from './render/schedule.js';
@@ -283,6 +284,12 @@ export async function runApp(o: {
           ui = { ...ui, card: { ...ui.card, truncated: true } };
         }
         if (ui.inputShown !== false) ui = { ...ui, inputShown: false };
+      }
+      if (ui.help === true) {
+        drawHelp(frame.cells, frame.cols, frame.rows);
+        frame.cursor = { ...frame.cursor, visible: false };
+        cardVisibleAt = null;
+        inputVisibleAt = null;
       }
       const hostModes = hostModesFrom(
         session.mirror,
@@ -939,6 +946,28 @@ export async function runApp(o: {
     };
 
     const handleEvent = (event: InputEvent): void => {
+      if (ui.help === true) {
+        lastKeyAt = Date.now();
+        if (
+          event.type === 'help-key' ||
+          event.type === 'agent-key' ||
+          (event.type === 'bytes' && event.data === '\x1b')
+        ) {
+          const result = reduce(ui, event);
+          ui = result.ui;
+          for (const action of result.actions) runAction(action);
+          requestRender();
+        }
+        return;
+      }
+      if (event.type === 'help-key') {
+        lastKeyAt = Date.now();
+        const result = reduce(ui, event);
+        ui = result.ui;
+        for (const action of result.actions) runAction(action);
+        requestRender();
+        return;
+      }
       if (event.type === 'mouse' && ui.focus === 'panel' && layout.panel.mode === 'overlay') {
         const rect = layout.panel.rect;
         if (
