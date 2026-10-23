@@ -114,6 +114,15 @@
 
   .note { margin: 0 0 64px; color: var(--ink-soft); font-size: 0.95rem; }
 
+  /* launch film */
+  .film video {
+    display: block; width: 100%; height: auto; aspect-ratio: 16 / 9;
+    background: var(--slate); border-radius: 10px;
+    box-shadow: 0 30px 60px -30px rgba(21, 26, 35, 0.55);
+  }
+  .film video::cue { font-family: var(--sans); background: rgba(21, 26, 35, 0.85); color: #fff; }
+  .film .soon { margin-top: 14px; }
+
   /* sections */
   section { padding: 56px 0; border-top: 1px solid var(--steel-deep); }
   h2 { margin: 0 0 10px; font: 600 clamp(1.5rem, 3vw, 2rem)/1.2 var(--sans); letter-spacing: -0.025em; }
@@ -229,6 +238,17 @@ See "systemctl status nginx.service" for details.
       </div>
       <p class="note">Preview: blocks and the folder header are still being built; the agent panel and approval card work today.</p>
     </div>
+
+    <section class="film" aria-labelledby="film">
+      <h2 id="film">Watch it work over ssh</h2>
+      <p class="section-lede">Thirty seconds: nginx fails on a remote box, the agent reads the screen, and nothing is typed until you press <kbd>y</kbd>.</p>
+      <video controls preload="metadata" playsinline width="1920" height="1080" poster="media/blockterm-launch.jpg" aria-describedby="film-note">
+        <source src="media/blockterm-launch.mp4" type="video/mp4">
+        <track kind="captions" src="media/blockterm-launch.en.vtt" srclang="en" label="English">
+        <a href="media/blockterm-launch.mp4">Download the 30-second film (MP4)</a>
+      </video>
+      <p class="soon" id="film-note">Narrated, with English captions. The host name and server output are illustrative.</p>
+    </section>
 
     <section aria-labelledby="what">
       <h2 id="what">What it is being built to do</h2>
