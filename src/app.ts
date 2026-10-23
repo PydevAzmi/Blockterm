@@ -13,6 +13,7 @@ import { buildSystemPrompt } from './agent/prompt.js';
 import { snapText } from './agent/tools.js';
 import type { ToolContext } from './agent/tools.js';
 import { BlockStore } from './blocks/store.js';
+import { copyText } from './clipboard.js';
 import { configPath, loadConfig as readConfigFile } from './config.js';
 import type { Config, LoadResult } from './config.js';
 import { initialUi, reduce } from './focus.js';
@@ -66,7 +67,7 @@ export async function runApp(o: {
   copy?: (text: string) => void;
 }): Promise<number> {
   const { shell, stdin, stdout } = o;
-  const copy = o.copy ?? ((): void => {});
+  const copy = o.copy ?? ((text: string): void => copyText(text, { writeHost: s => stdout.write(s) }));
   globalThis.AI_SDK_LOG_WARNINGS = false;
   const load = o.loadConfig ?? ((): LoadResult =>
     readConfigFile(configPath(process.platform, process.env, homedir())));
@@ -834,6 +835,7 @@ export async function runApp(o: {
           const block = selectionBlock();
           if (block !== null) {
             copy(key === 'copy-command' ? block.command : snapText(block.lines).join('\n'));
+            showSelectionNotice('copied', 2000);
           }
           break;
         }

@@ -694,6 +694,31 @@ test('c copies the command and o copies the output', async () => {
   await expect(run).resolves.toBe(0);
 });
 
+test('c and o show copied in the footer for two seconds', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
+
+  pty.emit(cycle('a\r\nb'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+
+  stdin.emit('data', 'c');
+  await until(() => output(stdout).includes('copied'));
+  await wait(1000);
+  expect(output(stdout)).toContain('copied');
+
+  stdin.emit('data', 'o');
+  await until(() => copied.length === 2);
+  await wait(2200);
+  expect(output(stdout)).not.toContain('copied');
+  expect(output(stdout)).toContain('c copy');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
 test('e explains the selected failed block', async () => {
   const model = new MockLanguageModelV4({ doGenerate: async () => reply('Cause: boom.') });
   const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
