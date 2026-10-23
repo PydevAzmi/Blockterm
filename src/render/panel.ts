@@ -14,6 +14,8 @@ export interface PanelView extends PanelUi {
   color?: string;
   /** Right-aligned note on the input line (approval pending, busy, ...). */
   status?: string;
+  /** Transcript lines scrolled up from the newest. */
+  scroll?: number;
 }
 
 export interface CardView {
@@ -33,6 +35,8 @@ export interface PanelDrawResult {
   cursor: { row: number; col: number } | null;
   cardTruncated: boolean;
   inputTruncated: boolean;
+  /** The transcript scroll actually used, clamped to what exists. */
+  scroll: number;
 }
 
 function charWidth(ch: string): 1 | 2 {
@@ -223,7 +227,8 @@ export function drawPanel(
       for (const text of wrapLine(escapeControl(segment), innerCols)) lines.push({ text, sgr });
     }
   }
-  const shown = lines.slice(Math.max(0, lines.length - available));
+  const scroll = Math.min(Math.max(0, ui.scroll ?? 0), Math.max(0, lines.length - available));
+  const shown = lines.slice(Math.max(0, lines.length - available - scroll), lines.length - scroll);
   const transcriptTop = contentEnd + 1 - cardHeight - shown.length;
   for (let i = 0; i < shown.length; i += 1) {
     writeRun(transcriptTop + i, innerCol, shown[i]!.text, shown[i]!.sgr, innerCols);
@@ -252,5 +257,5 @@ export function drawPanel(
   }
 
   const cursor = focused ? { row: inputRow, col: endX } : null;
-  return { cursor, cardTruncated, inputTruncated };
+  return { cursor, cardTruncated, inputTruncated, scroll };
 }

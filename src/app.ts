@@ -110,6 +110,7 @@ export async function runApp(o: {
     let sessionId: string | null = null;
     let configNoticeShown = false;
     let agentOpen = false;
+    let agentScroll = 0;
     let stopped = false;
 
     let layout = computeLayout({ cols: stdout.columns, rows: stdout.rows });
@@ -248,10 +249,11 @@ export async function runApp(o: {
           frame.cells,
           frame.cols,
           layout.panel.rect,
-          { ...ui, model: modelLabel, color: agentColor, status: footerStatus },
+          { ...ui, model: modelLabel, color: agentColor, status: footerStatus, scroll: agentScroll },
           transcript,
           card,
         );
+        agentScroll = panel.scroll;
         if (card !== null) {
           const now = Date.now();
           if (cardDrawnAt === null) cardDrawnAt = now;
@@ -292,7 +294,11 @@ export async function runApp(o: {
         cardVisibleAt = null;
         inputVisibleAt = null;
       }
-      const hostModes = hostModesFrom(session.mirror, trackedModes);
+      const hostModes = hostModesFrom(
+        session.mirror,
+        trackedModes,
+        (session.view === 'blocks' && store.integrated) || layout.panel.rect !== null,
+      );
       const out = hostModeDiff(lastHostModes, hostModes) + renderDiff(lastFrame, frame);
       if (out !== '') stdout.write(out);
       lastHostModes = hostModes;
@@ -529,6 +535,7 @@ export async function runApp(o: {
 
       const activeModel = ensured.model;
       transcript.push({ who: 'you', text });
+      agentScroll = 0;
       agentOpen = false;
 
       const controller = new AbortController();
@@ -884,6 +891,24 @@ export async function runApp(o: {
       return now - seenAt < APPROVAL_QUIET_MS || quiet < APPROVAL_QUIET_MS;
     };
 
+    // The wheel scrolls whichever area it is over. Other reports we asked for only to get the
+    // wheel are dropped; a program that asked for the mouse itself gets them in the shell area.
+    const wheelEvent = (event: Extract<InputEvent, { type: 'mouse' }>): boolean => {
+      const wheel = event.button & ~(4 | 8 | 16);
+      const step = wheel === 64 ? 3 : wheel === 65 ? -3 : 0;
+      const rect = layout.panel.rect;
+      if (rect !== null && event.row >= rect.row && event.row < rect.row + rect.rows) {
+        if (step !== 0) {
+          agentScroll = Math.max(0, agentScroll + step);
+          requestRender();
+        }
+        return true;
+      }
+      if (session.mirror.modes.mouseTrackingMode !== 'none') return false;
+      if (step !== 0 && session.view === 'blocks' && store.integrated) scrollBy(step);
+      return true;
+    };
+
     const handleEvent = (event: InputEvent): void => {
       if (ui.help === true) {
         lastKeyAt = Date.now();
@@ -907,6 +932,7 @@ export async function runApp(o: {
         requestRender();
         return;
       }
+      if (event.type === 'mouse' && wheelEvent(event)) return;
       const now = Date.now();
       const quiet = now - lastKeyAt;
       if (blocksApprove(event, now, quiet)) {

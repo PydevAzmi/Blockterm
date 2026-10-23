@@ -96,6 +96,17 @@ test('a long transcript line wraps across the full width', () => {
   expect(rowText(cs, INPUT_ROW - 1).trimEnd()).toBe('x'.repeat(20));
 });
 
+test('scroll shows older transcript lines and is clamped to what exists', () => {
+  const transcript: Transcript[] = Array.from({ length: 20 }, (_, i) => ({ who: 'agent', text: `line ${i}` }));
+  const cs = blank();
+  const result = drawPanel(cs, FRAME_COLS, RECT, ui({ scroll: 5 }), transcript, null);
+  expect(result.scroll).toBe(5);
+  expect(rowText(cs, INPUT_ROW - 1).trimEnd()).toBe('line 14');
+
+  const top = drawPanel(blank(), FRAME_COLS, RECT, ui({ scroll: 999 }), transcript, null);
+  expect(top.scroll).toBe(20 - (RECT.rows - 1));
+});
+
 test('the panel draws no box characters', () => {
   const cs = blank();
   drawPanel(cs, FRAME_COLS, RECT, ui({ model: 'm' }), [{ who: 'agent', text: 'hi' }], null);

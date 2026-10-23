@@ -96,7 +96,8 @@ model.
 ## Borderless view
 
 - [ ] **No frame, no side pane.** The shell fills the window; the last line reads `(your-shell) folder (branch) · model`.
-- [ ] **Native copy.** Drag across block output with the mouse and copy it with your terminal's own copy; the pasted text has no border characters.
+- [ ] **Wheel scroll.** The wheel scrolls the blocks, and scrolls the agent replies when the pointer is over the agent strip.
+- [ ] **Native copy.** Shift+drag across block output and copy it with your terminal's own copy; the pasted text has no border characters.
 - [ ] **Agent line.** `ctrl+k` shows `(agent · model) ❯` at the bottom; a reply appears above it in `agentColor` (try `"agentColor": "magenta"`).
 - [ ] **Two at once.** Open two tabs, `blockterm --shell bash` in one and `blockterm --shell pwsh` in the other; both work independently.
 

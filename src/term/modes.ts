@@ -82,13 +82,14 @@ export function trackModes(
 }
 
 // ponytail: RIS/DECSTR resets not tracked
-// Mouse reporting is forwarded only when the program inside asks for it, so the host
-// terminal keeps its own selection and copy everywhere else.
-export function hostModesFrom(mirror: Terminal, t: TrackedModes): HostModes {
+// With wantWheel, blockterm asks for mouse reports to scroll the blocks and the agent strip;
+// host terminals still select natively with Shift+drag (Option+drag in iTerm2).
+export function hostModesFrom(mirror: Terminal, t: TrackedModes, wantWheel = false): HostModes {
+  const inner = mirror.modes.mouseTrackingMode;
   return {
     appCursor: mirror.modes.applicationCursorKeysMode,
     appKeypad: mirror.modes.applicationKeypadMode,
-    mouse: mirror.modes.mouseTrackingMode,
+    mouse: wantWheel && inner === 'none' ? 'vt200' : inner,
     cursorStyle: t.cursorStyle,
   };
 }

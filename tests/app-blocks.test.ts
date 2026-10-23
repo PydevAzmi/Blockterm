@@ -247,6 +247,44 @@ test('shift+PgUp scrolls up and new output shows the footer marker', async () =>
   await expect(run).resolves.toBe(0);
 });
 
+test('the wheel scrolls the blocks and never reaches the pty', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle(lines(30)));
+  await until(() => output(stdout).includes('L30'));
+  expect(output(stdout)).not.toContain('$ ls ─');
+
+  for (let i = 0; i < 4; i += 1) stdin.emit('data', '\x1b[<64;5;5M');
+  await until(() => output(stdout).includes('$ ls ─'));
+  expect(pty.written).toEqual([]);
+  expect(stdout.writes.join('')).toContain('\x1b[?1000h');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('the wheel over the agent strip scrolls the transcript, not the blocks', async () => {
+  const model = new MockLanguageModelV4({
+    doGenerate: async () => reply(Array.from({ length: 12 }, (_, i) => `R${String(i).padStart(2, '0')}`).join('\n')),
+  });
+  const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
+
+  pty.emit(failedCycle('Error: boom'));
+  await until(() => output(stdout).includes('$ npm test ─'));
+  stdin.emit('data', '\x1b[1;5A');
+  stdin.emit('data', 'e');
+  await until(() => output(stdout).includes('R11'));
+  const strip = renderScreen(stdout).findIndex(row => row.includes('R11'));
+  expect(output(stdout)).not.toContain('R00');
+
+  for (let i = 0; i < 4; i += 1) stdin.emit('data', `\x1b[<64;5;${strip + 1}M`);
+  await until(() => output(stdout).includes('R00'));
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
 test('shift+PgUp scrolls a page', async () => {
   const { run, pty, stdin, stdout } = startApp();
 
