@@ -40,6 +40,11 @@ type SendResult =
   | { status: 'denied'; reason: string };
 
 type ToolOutcome = SendResult | { status: 'cancelled' };
+type WriteToolName = 'send_keys' | 'run_command';
+
+function isWriteTool(name: string): name is WriteToolName {
+  return name === 'send_keys' || name === 'run_command';
+}
 
 const DEFAULT_MAX_TOOL_CALLS = 25;
 const DEFAULT_MAX_MS = 10 * 60 * 1000;
@@ -119,17 +124,19 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
     }
   };
 
-  const handleSendKeys = async (rawInput: unknown): Promise<SendResult | 'abort'> => {
+  // guard runs again right before each write: the prompt can change while the card is open.
+  const handleKeys = async (
+    keys: string,
+    guard: () => SendResult | null = () => null,
+  ): Promise<SendResult | 'abort'> => {
     if (o.signal.aborted) return 'abort';
-    const keys =
-      typeof rawInput === 'object' && rawInput !== null && 'keys' in rawInput
-        ? String((rawInput as { keys: unknown }).keys)
-        : '';
     const parsed = parseKeys(keys);
     if (!parsed.ok) return { status: 'error', message: parsed.message };
 
     if (allowRest) {
       if (o.signal.aborted) return 'abort';
+      const blocked = guard();
+      if (blocked !== null) return blocked;
       const bytes = keysToBytes(parsed.tokens, o.ctx.appCursor());
       o.ctx.session.write(bytes);
       emit({ type: 'sent', keys, auto: true });
@@ -143,12 +150,47 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
     const chosen = parseKeys(decision.keys);
     if (!chosen.ok) return { status: 'error', message: chosen.message };
     if (o.signal.aborted) return 'abort';
+    const blocked = guard();
+    if (blocked !== null) return blocked;
     if (decision.allowRest) allowRest = true;
 
     const bytes = keysToBytes(chosen.tokens, o.ctx.appCursor());
     o.ctx.session.write(bytes);
     emit({ type: 'sent', keys: decision.keys, auto: false });
     return { status: 'done', sent: bytes, edited: decision.keys !== keys };
+  };
+
+  const handleWrite = async (
+    toolName: WriteToolName,
+    rawInput: unknown,
+  ): Promise<SendResult | 'abort'> => {
+    if (o.signal.aborted) return 'abort';
+
+    if (toolName === 'run_command') {
+      // ponytail: echo of an earlier write in the same step may not be parsed yet, so an
+      // auto-approved run_command right after send_keys can still see a stale idle prompt.
+      const notIdle = (): SendResult | null => {
+        const blocks = o.ctx.blocks;
+        if (blocks === null) return { status: 'error', message: 'blocks need shell integration' };
+        if (!blocks.isIdlePrompt()) {
+          return { status: 'error', message: 'not at an idle prompt — use send_keys' };
+        }
+        return null;
+      };
+      const blocked = notIdle();
+      if (blocked !== null) return blocked;
+      const command =
+        typeof rawInput === 'object' && rawInput !== null && 'command' in rawInput
+          ? String((rawInput as { command: unknown }).command)
+          : '';
+      return handleKeys(command.replaceAll('<', '<lt>') + '<Enter>', notIdle);
+    }
+
+    const keys =
+      typeof rawInput === 'object' && rawInput !== null && 'keys' in rawInput
+        ? String((rawInput as { keys: unknown }).keys)
+        : '';
+    return handleKeys(keys);
   };
 
   try {
@@ -180,7 +222,7 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
       });
 
       let callsThisCall = 0;
-      const pending: { toolCallId: string; input: unknown }[] = [];
+      const pending: { toolCallId: string; toolName: WriteToolName; input: unknown }[] = [];
       let streamError: string | undefined;
 
       try {
@@ -191,8 +233,12 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
             callsThisCall += 1;
             // Invalid calls already have an error result recorded by the SDK.
             if (part.invalid !== true) {
-              if (part.toolName === 'send_keys') {
-                pending.push({ toolCallId: part.toolCallId, input: part.input });
+              if (isWriteTool(part.toolName)) {
+                pending.push({
+                  toolCallId: part.toolCallId,
+                  toolName: part.toolName,
+                  input: part.input,
+                });
               } else if (readNames.has(part.toolName)) {
                 emit({ type: 'tool', name: part.toolName });
               }
@@ -230,16 +276,20 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
       const results: {
         type: 'tool-result';
         toolCallId: string;
-        toolName: 'send_keys';
+        toolName: WriteToolName;
         output: { type: 'json'; value: ToolOutcome };
       }[] = [];
       const pushResults = (): void => {
         messages.push({ role: 'tool', content: results });
       };
-      const resultFor = (toolCallId: string, value: ToolOutcome): (typeof results)[number] => ({
+      const resultFor = (
+        toolCallId: string,
+        toolName: WriteToolName,
+        value: ToolOutcome,
+      ): (typeof results)[number] => ({
         type: 'tool-result',
         toolCallId,
-        toolName: 'send_keys',
+        toolName,
         output: { type: 'json', value },
       });
 
@@ -247,11 +297,16 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
         const call = pending[index]!;
         let outcome: SendResult | 'abort';
         try {
-          outcome = await handleSendKeys(call.input);
+          outcome = await handleWrite(call.toolName, call.input);
         } catch (error) {
           const message = redact(messageOf(error), secrets);
           for (let rest = index; rest < pending.length; rest += 1) {
-            results.push(resultFor(pending[rest]!.toolCallId, { status: 'error', message }));
+            results.push(
+              resultFor(pending[rest]!.toolCallId, pending[rest]!.toolName, {
+                status: 'error',
+                message,
+              }),
+            );
           }
           pushResults();
           if (isAbort(error, o.signal)) emit({ type: 'cancelled' });
@@ -260,13 +315,17 @@ export async function runTask(o: TaskOptions): Promise<ModelMessage[]> {
         }
         if (outcome === 'abort') {
           for (let rest = index; rest < pending.length; rest += 1) {
-            results.push(resultFor(pending[rest]!.toolCallId, { status: 'cancelled' }));
+            results.push(
+              resultFor(pending[rest]!.toolCallId, pending[rest]!.toolName, {
+                status: 'cancelled',
+              }),
+            );
           }
           pushResults();
           emit({ type: 'cancelled' });
           return messages;
         }
-        results.push(resultFor(call.toolCallId, outcome));
+        results.push(resultFor(call.toolCallId, call.toolName, outcome));
       }
       pushResults();
     }

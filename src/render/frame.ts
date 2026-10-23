@@ -2,6 +2,7 @@ import type { IBufferCell, Terminal } from '@xterm/headless';
 
 import type { Layout } from '../layout.js';
 import type { View } from '../term/session.js';
+import { composeBlocks, type BlocksView } from './blocks.js';
 
 export interface Cell {
   ch: string;
@@ -14,6 +15,7 @@ export interface Frame {
   rows: number;
   cells: Cell[];
   cursor: { row: number; col: number; visible: boolean };
+  blocksDocHeight?: number;
 }
 
 export interface Chrome {
@@ -21,6 +23,8 @@ export interface Chrome {
   footer: string;
   view: View;
   footerStatus?: string;
+  blocks?: BlocksView;
+  now?: number;
 }
 
 export const FOOTER = 'F1 help · ctrl+k agent · ctrl+l clear';
@@ -111,12 +115,33 @@ export function composeFrame(
   const side = chrome.view === 'blocks' ? '│' : ' ';
   const rightSide = layout.origin.col + layout.pty.cols;
   const rightBorder = rightSide + 1;
+  const blocks =
+    chrome.view === 'blocks' && chrome.blocks !== undefined && chrome.blocks.store.integrated
+      ? composeBlocks(
+          mirror,
+          chrome.blocks,
+          { cols: layout.pty.cols + 2, rows: layout.pty.rows },
+          chrome.now ?? Date.now(),
+        )
+      : null;
 
   for (let r = 1; r <= rows - 3; r += 1) {
     put(r, 0, '│', 1, '');
     if (rightBorder < cols) put(r, rightBorder, '│', 1, '');
     put(r, 1, side, 1, '');
     if (rightSide > 1 && rightSide < cols) put(r, rightSide, side, 1, '');
+
+    if (blocks !== null) {
+      const blockRow = blocks.rows[r - 1];
+      if (blockRow !== undefined) {
+        const left = layout.origin.col - 1;
+        for (let x = 0; x < blockRow.length && left + x < cols; x += 1) {
+          const copied = blockRow[x]!;
+          put(r, left + x, copied.ch, copied.width, copied.sgr);
+        }
+      }
+      continue;
+    }
 
     const i = r - 1;
     if (i >= layout.pty.rows) continue;
@@ -133,12 +158,24 @@ export function composeFrame(
     }
   }
 
-  const cursor = {
+  let cursor = {
     row: layout.origin.row + active.cursorY,
     col: layout.origin.col + active.cursorX,
     visible:
       cursorVisible && active.viewportY === active.baseY && active.cursorX < layout.pty.cols,
   };
 
-  return { cols, rows, cells, cursor };
+  if (blocks !== null) {
+    if (blocks.cursor !== null) {
+      cursor = {
+        row: layout.origin.row + blocks.cursor.row,
+        col: layout.origin.col - 1 + blocks.cursor.col,
+        visible: cursorVisible,
+      };
+    } else {
+      cursor = { ...cursor, visible: false };
+    }
+  }
+
+  return { cols, rows, cells, cursor, blocksDocHeight: blocks?.docHeight };
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-import { createFrameScheduler } from '../../src/render/schedule.js';
+import { createFrameScheduler, createRunningTicker } from '../../src/render/schedule.js';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -53,4 +53,32 @@ test('dispose clears a pending render', () => {
   vi.advanceTimersByTime(100);
 
   expect(render).not.toHaveBeenCalled();
+});
+
+test('running ticker: one interval per second while running, cleared when stopped and disposed', () => {
+  const render = vi.fn();
+  const ticker = createRunningTicker(render, 1000);
+
+  ticker.sync(true);
+  ticker.sync(true);
+  vi.advanceTimersByTime(999);
+  expect(render).not.toHaveBeenCalled();
+
+  vi.advanceTimersByTime(1);
+  expect(render).toHaveBeenCalledTimes(1);
+
+  vi.advanceTimersByTime(1000);
+  expect(render).toHaveBeenCalledTimes(2);
+
+  ticker.sync(false);
+  vi.advanceTimersByTime(3000);
+  expect(render).toHaveBeenCalledTimes(2);
+
+  ticker.sync(true);
+  vi.advanceTimersByTime(1000);
+  expect(render).toHaveBeenCalledTimes(3);
+
+  ticker.dispose();
+  vi.advanceTimersByTime(3000);
+  expect(render).toHaveBeenCalledTimes(3);
 });

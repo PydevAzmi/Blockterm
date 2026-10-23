@@ -602,7 +602,8 @@ installs the packed tarball (`npm pack`) on clean runners to prove no compiler i
    release doc, first publish.
 
 Slices 3–5 (config, agent read only, agent writes) were built before slice 2 (blocks) at the owner's
-request, so the agent path could be proven end to end first.
+request, so the agent path could be proven end to end first. Slice 2 (blocks) shipped on 2026-10-23
+with the deviations recorded in the slice-2 ledger (Rulings AF, AG).
 
 ## 11. Left to the builder
 

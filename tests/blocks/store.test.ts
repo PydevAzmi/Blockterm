@@ -59,6 +59,22 @@ test('colour: a coloured line keeps its sgr on every cell', async () => {
   expect(line.cells[1]!.sgr).toBe('31');
 });
 
+test('wrapped line: a written space at the wrap point is not trimmed', async () => {
+  const mirror = makeMirror(40);
+  const store = new BlockStore(mirror);
+
+  await write(
+    mirror,
+    '\x1b]133;B\x07wrap\r\n\x1b]133;C\x07' + 'a'.repeat(39) + ' b\r\n\x1b]133;D;0\x07',
+  );
+
+  const first = store.blocks[0]!.lines[0]!;
+  expect(first.wrapped).toBe(true);
+  expect(first.cells).toHaveLength(40);
+  expect(first.cells[39]!.ch).toBe(' ');
+  expect(text(first)).toBe('a'.repeat(39));
+});
+
 test('alt screen mid-block: junk from the other screen is not captured', async () => {
   const mirror = makeMirror();
   const store = new BlockStore(mirror);
@@ -186,6 +202,22 @@ test('output on the D row is captured as the last line', async () => {
   const store = new BlockStore(mirror);
   await write(mirror, '\x1b]133;B\x07printf x\r\n\x1b]133;C\x07x\x1b]133;D;0\x07');
   expect(store.blocks[0]!.lines.map(text)).toEqual(['x']);
+});
+
+test('finished blocks cap at the newest 200', async () => {
+  const mirror = makeMirror(20, 10, 2000);
+  const store = new BlockStore(mirror);
+
+  for (let i = 0; i < 201; i += 1) {
+    await write(
+      mirror,
+      `\x1b]133;B\x07cmd${i}\r\n\x1b]133;C\x07out${i}\r\n\x1b]133;D;0\x07`,
+    );
+  }
+
+  expect(store.blocks).toHaveLength(200);
+  expect(store.blocks[0]!.command).toBe('cmd1');
+  expect(store.blocks[199]!.command).toBe('cmd200');
 });
 
 test('scrollback eviction: omitted counts the lost lines', async () => {

@@ -120,6 +120,13 @@ test('bytes pass through unchanged', () => {
   expect(routeToPty({ type: 'bytes', data: 'ls\r' }, ctx)).toBe('ls\r');
 });
 
+test('page keys pass through unchanged unless the app consumes them', () => {
+  const ctx = { modes: m({}), tracked, layout };
+  expect(routeToPty({ type: 'page-key', direction: 'up', data: '\x1b[5;2~' }, ctx)).toBe(
+    '\x1b[5;2~',
+  );
+});
+
 test('routeToPty routes mouse and paste through the modes', () => {
   const ctx = {
     modes: m({ mouseTrackingMode: 'vt200', bracketedPasteMode: true }),

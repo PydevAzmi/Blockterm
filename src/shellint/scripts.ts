@@ -3,7 +3,6 @@ if [ -z "\${BLOCKTERM_SHELL_INTEGRATION-}" ]; then
   BLOCKTERM_SHELL_INTEGRATION=1
 
   __blockterm_prompt_done="0"
-  __blockterm_last_hist=""
   __blockterm_in_command="0"
   __blockterm_original_prompt_command="\${PROMPT_COMMAND-}"
 
@@ -35,19 +34,12 @@ if [ -z "\${BLOCKTERM_SHELL_INTEGRATION-}" ]; then
     __blockterm_status="$?"
     __blockterm_pipestatus=("\${PIPESTATUS[@]}")
 
-    local __blockterm_hist="\${HISTCMD-}"
+    # Set by PS0 or the DEBUG trap; HISTCMD would miss ignoredups/ignorespace commands.
     local __blockterm_ran="0"
-    if [ "$__blockterm_prompt_done" = "1" ]; then
-      if [ "\${__blockterm_use_debug-0}" = "1" ]; then
-        if [ "\${__blockterm_debug_ran-0}" = "1" ]; then
-          __blockterm_ran="1"
-        fi
-      elif [ -z "$__blockterm_hist" ] || [ "$__blockterm_hist" != "\${__blockterm_last_hist-}" ]; then
-        __blockterm_ran="1"
-      fi
+    if [ "$__blockterm_prompt_done" = "1" ] && [ "\${__blockterm_cmd_ran-0}" = "1" ]; then
+      __blockterm_ran="1"
     fi
-    __blockterm_debug_ran="0"
-    __blockterm_last_hist="$__blockterm_hist"
+    __blockterm_cmd_ran="0"
     __blockterm_prompt_done="1"
     __blockterm_in_command="0"
 
@@ -80,7 +72,7 @@ if [ -z "\${BLOCKTERM_SHELL_INTEGRATION-}" ]; then
       esac
       if [ "$__blockterm_in_command" = "0" ]; then
         __blockterm_in_command="1"
-        __blockterm_debug_ran="1"
+        __blockterm_cmd_ran="1"
         builtin printf '\\e]133;C\\a'
       fi
     }
@@ -98,7 +90,8 @@ if [ -z "\${BLOCKTERM_SHELL_INTEGRATION-}" ]; then
     }
     trap '__blockterm_debug_handler' DEBUG
   else
-    PS0="\\[\\e]133;C\\a\\]\${PS0-}"
+    # The arithmetic subscript sets the flag in the current shell and expands to nothing.
+    PS0="\\[\\e]133;C\\a\\]\\\${__blockterm_x[__blockterm_cmd_ran=1]}\${PS0-}"
   fi
 
   __blockterm_update_prompt
@@ -274,7 +267,6 @@ if (-not $global:__blockterm_integrated) {
     return $result
   }
 
-  Import-Module PSReadLine -ErrorAction SilentlyContinue
   if (Get-Module -Name PSReadLine) {
     $global:__blockterm_has_psreadline = $true
     $global:__blockterm_original_readline = $function:PSConsoleHostReadLine

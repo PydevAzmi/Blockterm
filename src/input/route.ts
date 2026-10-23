@@ -63,6 +63,8 @@ export function routeToPty(
     case 'focus':
       if (!ctx.modes.sendFocusMode) return null;
       return e.focused ? '\x1b[I' : '\x1b[O';
+    case 'page-key':
+      return e.data;
     case 'agent-key':
     case 'help-key':
       return null;

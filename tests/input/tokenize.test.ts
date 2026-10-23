@@ -23,6 +23,19 @@ test('F1 is help-key in both encodings', () => {
   expect(new InputTokenizer().push('\x1b[11~')).toEqual([{ type: 'help-key' }]);
 });
 
+test('shift+page keys are recognised across pushes', () => {
+  expect(new InputTokenizer().push('\x1b[5;2~')).toEqual([
+    { type: 'page-key', direction: 'up', data: '\x1b[5;2~' },
+  ]);
+  expect(new InputTokenizer().push('\x1b[6;2~')).toEqual([
+    { type: 'page-key', direction: 'down', data: '\x1b[6;2~' },
+  ]);
+
+  const t = new InputTokenizer();
+  expect(t.push('\x1b[5;')).toEqual([]);
+  expect(t.push('2~')).toEqual([{ type: 'page-key', direction: 'up', data: '\x1b[5;2~' }]);
+});
+
 test('SGR mouse press', () => {
   expect(new InputTokenizer().push('\x1b[<0;10;5M')).toEqual([
     { type: 'mouse', button: 0, col: 9, row: 4, action: 'press' },

@@ -152,6 +152,9 @@ export function reduce(ui: PanelUi, e: InputEvent): { ui: PanelUi; actions: Acti
       return { ui, actions: [{ type: 'to-pty', event: e }] };
     case 'help-key':
       return { ui, actions: [] };
+    case 'page-key':
+      if (ui.focus === 'terminal') return { ui, actions: [{ type: 'to-pty', event: e }] };
+      return { ui, actions: [] };
     case 'mouse':
       if (ui.focus === 'panel') return { ui, actions: [] };
       return { ui, actions: [{ type: 'to-pty', event: e }] };

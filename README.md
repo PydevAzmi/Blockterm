@@ -1,7 +1,15 @@
 # Blockterm
-an open-source terminal named Blockterm. It wraps your real shell — ssh, vim, anything — and keeps it exactly as it is. Press `ctrl+k` to open an agent panel, describe what you want in plain words, and it types into your shell one approved keystroke at a time. Command blocks and `#` plain-English suggestions are coming.
+an open-source terminal named Blockterm. It wraps your real shell — ssh, vim, anything — and keeps it exactly as it is. Press `ctrl+k` to open an agent panel, describe what you want in plain words, and it types into your shell one approved keystroke at a time. Command blocks work today; `#` plain-English suggestions are coming.
 
 Website: https://blockterm.mohamedazmi.dev
+
+## Blocks
+
+Each command's output becomes a block with its exit status and how long it took.
+
+Scroll with the mouse wheel or `shift+PgUp`/`shift+PgDn`. At an idle prompt, `ctrl+l` clears the blocks.
+
+Blocks work in bash (including Git Bash on Windows; macOS bash 3.2), zsh and PowerShell 7 (Windows and Linux; not macOS yet). Windows PowerShell 5.1 and WSL bash run without blocks for now. Set `BLOCKTERM_NO_INTEGRATION=1` to turn blocks off.
 
 ## Build from source
 
@@ -49,6 +57,8 @@ The agent reads whatever is on your screen — a remote shell, a vim buffer — 
    ```
 
 4. Ask. Press `ctrl+k` anywhere — even inside ssh or vim — and write in plain words. When the agent wants to type something into your shell, approve it with `y`, edit it with `e`, deny it with `n`, or allow the rest of the task with `a`. It never sends a keystroke you have not approved.
+
+The agent can also run a command at an idle prompt (`run_command`), list recent blocks (`list_blocks`) and read one block's output (`read_block`). `run_command` waits for the same approval as typed keys.
 
 `BLOCKTERM_CONFIG=path` overrides the config file location.
 

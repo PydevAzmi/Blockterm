@@ -25,3 +25,27 @@ export function createFrameScheduler(
 
   return { request, dispose };
 }
+
+export function createRunningTicker(
+  request: () => void,
+  intervalMs = 1000,
+): { sync(running: boolean): void; dispose(): void } {
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const sync = (running: boolean): void => {
+    if (running && timer === null) timer = setInterval(request, intervalMs);
+    else if (!running && timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  const dispose = (): void => {
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  return { sync, dispose };
+}

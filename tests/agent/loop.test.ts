@@ -3,6 +3,8 @@ import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test';
 
 import type { Decision, AgentEvent } from '../../src/agent/loop.js';
 import { runTask } from '../../src/agent/loop.js';
+import { cardTokens } from '../../src/app.js';
+import { BlockStore } from '../../src/blocks/store.js';
 import { TerminalSession } from '../../src/term/session.js';
 import { FakePty } from '../helpers/fake-pty.js';
 
@@ -40,6 +42,38 @@ function harness() {
   const session = new TerminalSession(pty, { cols: 80, rows: 24 });
   const events: AgentEvent[] = [];
   return { pty, session, events };
+}
+
+function blocksHarness() {
+  const pty = new FakePty();
+  const session = new TerminalSession(pty, { cols: 80, rows: 24 });
+  const store = new BlockStore(session.mirror);
+  const events: AgentEvent[] = [];
+  return { pty, session, store, events };
+}
+
+function toolResultToolName(history: unknown[], id: string): string | undefined {
+  for (const message of history as { role: string; content: unknown }[]) {
+    if (message.role !== 'tool' || !Array.isArray(message.content)) continue;
+    for (const part of message.content as { type: string; toolCallId?: string; toolName?: string }[]) {
+      if (part.type === 'tool-result' && part.toolCallId === id) return part.toolName;
+    }
+  }
+  return undefined;
+}
+
+function toolResultValue(history: unknown[], id: string): unknown {
+  for (const message of history as { role: string; content: unknown }[]) {
+    if (message.role !== 'tool' || !Array.isArray(message.content)) continue;
+    for (const part of message.content as {
+      type: string;
+      toolCallId?: string;
+      output?: { value?: unknown };
+    }[]) {
+      if (part.type === 'tool-result' && part.toolCallId === id) return part.output?.value;
+    }
+  }
+  return undefined;
 }
 
 function lastPrompt(model: MockLanguageModelV4): string {
@@ -827,3 +861,241 @@ test('approval error stored in history is redacted', async () => {
   expect(JSON.stringify(history)).not.toContain('sk-secret-123');
 });
 
+
+test('run_command at an idle prompt goes through the send_keys approval path', async () => {
+  const { pty, session, store, events } = blocksHarness();
+  pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07');
+  await until(() => store.isIdlePrompt());
+
+  const approveCalls: string[] = [];
+  let n = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      return n === 1 ? callStream('c1', 'run_command', { command: 'ls -la' }) : textStream('ok');
+    },
+  });
+
+  const history = await runTask({
+    model,
+    system: 'sys',
+    history: [],
+    prompt: 'go',
+    ctx: { session, appCursor: () => false, blocks: store },
+    target: () => 'shell',
+    approve: async keys => {
+      approveCalls.push(keys);
+      return { kind: 'approve', keys, allowRest: false };
+    },
+    onEvent: e => events.push(e),
+    signal: new AbortController().signal,
+    secrets: [],
+  });
+
+  expect(approveCalls).toEqual(['ls -la<Enter>']);
+  expect(cardTokens(approveCalls[0]!)).toEqual([
+    { kind: 'text', label: 'ls -la' },
+    { kind: 'key', label: '⏎ Enter' },
+  ]);
+  expect(pty.written.at(-1)).toBe('ls -la\r');
+  expect(events).toContainEqual({ type: 'approval', keys: 'ls -la<Enter>', target: 'shell' });
+  expect(events).toContainEqual({ type: 'sent', keys: 'ls -la<Enter>', auto: false });
+  expect(toolResultValue(history, 'c1')).toMatchObject({ status: 'done' });
+  expect(toolResultToolName(history, 'c1')).toBe('run_command');
+});
+
+test('mixed write tools keep their own tool names in the results', async () => {
+  const { pty, session, store, events } = blocksHarness();
+  pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07');
+  await until(() => store.isIdlePrompt());
+
+  const keys = JSON.stringify({ keys: 'a<Enter>' });
+  const command = JSON.stringify({ command: 'ls' });
+  let n = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      if (n !== 1) return textStream('ok');
+      return {
+        stream: convertArrayToReadableStream([
+          { type: 'tool-input-start', id: 'c1', toolName: 'send_keys' },
+          { type: 'tool-input-delta', id: 'c1', delta: keys },
+          { type: 'tool-input-end', id: 'c1' },
+          { type: 'tool-call', toolCallId: 'c1', toolName: 'send_keys', input: keys },
+          { type: 'tool-input-start', id: 'c2', toolName: 'run_command' },
+          { type: 'tool-input-delta', id: 'c2', delta: command },
+          { type: 'tool-input-end', id: 'c2' },
+          { type: 'tool-call', toolCallId: 'c2', toolName: 'run_command', input: command },
+          { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage: USAGE },
+        ]),
+      };
+    },
+  });
+
+  const history = await runTask({
+    model,
+    system: 'sys',
+    history: [],
+    prompt: 'go',
+    ctx: { session, appCursor: () => false, blocks: store },
+    target: () => 'shell',
+    approve: async keys => ({ kind: 'approve', keys, allowRest: false }),
+    onEvent: e => events.push(e),
+    signal: new AbortController().signal,
+    secrets: [],
+  });
+
+  expect(pty.written).toEqual(['a\r', 'ls\r']);
+  expect(toolResultToolName(history, 'c1')).toBe('send_keys');
+  expect(toolResultToolName(history, 'c2')).toBe('run_command');
+  expect(toolResultValue(history, 'c2')).toMatchObject({ status: 'done' });
+});
+
+test('run_command sends a literal < as <lt>', async () => {
+  const { pty, session, store, events } = blocksHarness();
+  pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07');
+  await until(() => store.isIdlePrompt());
+
+  const approveCalls: string[] = [];
+  let n = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      return n === 1 ? callStream('c1', 'run_command', { command: 'a<b' }) : textStream('ok');
+    },
+  });
+
+  await runTask({
+    model,
+    system: 'sys',
+    history: [],
+    prompt: 'go',
+    ctx: { session, appCursor: () => false, blocks: store },
+    target: () => 'shell',
+    approve: async keys => {
+      approveCalls.push(keys);
+      return { kind: 'approve', keys, allowRest: false };
+    },
+    onEvent: e => events.push(e),
+    signal: new AbortController().signal,
+    secrets: [],
+  });
+
+  expect(approveCalls).toEqual(['a<lt>b<Enter>']);
+  expect(pty.written.at(-1)).toBe('a<b\r');
+});
+
+test('run_command writes nothing if the prompt stops being idle while the card is open', async () => {
+  const { pty, session, store, events } = blocksHarness();
+  pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07');
+  await until(() => store.isIdlePrompt());
+
+  let n = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      return n === 1 ? callStream('c1', 'run_command', { command: 'ls' }) : textStream('ok');
+    },
+  });
+
+  const history = await runTask({
+    model,
+    system: 'sys',
+    history: [],
+    prompt: 'go',
+    ctx: { session, appCursor: () => false, blocks: store },
+    target: () => 'shell',
+    approve: async keys => {
+      pty.emit('x');
+      await until(() => !store.isIdlePrompt());
+      return { kind: 'approve', keys, allowRest: false };
+    },
+    onEvent: e => events.push(e),
+    signal: new AbortController().signal,
+    secrets: [],
+  });
+
+  expect(pty.written).toEqual([]);
+  expect(toolResultValue(history, 'c1')).toEqual({
+    status: 'error',
+    message: 'not at an idle prompt — use send_keys',
+  });
+});
+
+test('run_command away from an idle prompt fails without approval or writing', async () => {
+  const { pty, session, store, events } = blocksHarness();
+  pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07');
+  await until(() => store.isIdlePrompt());
+  pty.emit('x');
+  await until(() => !store.isIdlePrompt());
+
+  const approveCalls: string[] = [];
+  let n = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      return n === 1 ? callStream('c1', 'run_command', { command: 'ls' }) : textStream('ok');
+    },
+  });
+
+  const history = await runTask({
+    model,
+    system: 'sys',
+    history: [],
+    prompt: 'go',
+    ctx: { session, appCursor: () => false, blocks: store },
+    target: () => 'shell',
+    approve: async keys => {
+      approveCalls.push(keys);
+      return { kind: 'approve', keys, allowRest: false };
+    },
+    onEvent: e => events.push(e),
+    signal: new AbortController().signal,
+    secrets: [],
+  });
+
+  expect(approveCalls).toEqual([]);
+  expect(pty.written).toEqual([]);
+  expect(events.some(e => e.type === 'approval')).toBe(false);
+  expect(toolResultValue(history, 'c1')).toEqual({
+    status: 'error',
+    message: 'not at an idle prompt — use send_keys',
+  });
+});
+
+test('run_command without shell integration fails without approval or writing', async () => {
+  const { pty, session, events } = harness();
+
+  const approveCalls: string[] = [];
+  let n = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      return n === 1 ? callStream('c1', 'run_command', { command: 'ls' }) : textStream('ok');
+    },
+  });
+
+  const history = await runTask({
+    model,
+    system: 'sys',
+    history: [],
+    prompt: 'go',
+    ctx: { session, appCursor: () => false, blocks: null },
+    target: () => 'shell',
+    approve: async keys => {
+      approveCalls.push(keys);
+      return { kind: 'approve', keys, allowRest: false };
+    },
+    onEvent: e => events.push(e),
+    signal: new AbortController().signal,
+    secrets: [],
+  });
+
+  expect(approveCalls).toEqual([]);
+  expect(pty.written).toEqual([]);
+  expect(events.some(e => e.type === 'approval')).toBe(false);
+  expect(toolResultValue(history, 'c1')).toEqual({
+    status: 'error',
+    message: 'blocks need shell integration',
+  });
+});

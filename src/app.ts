@@ -10,6 +10,7 @@ import { createModel, keyHint, redact } from './agent/model.js';
 import type { ModelResult } from './agent/model.js';
 import { buildSystemPrompt } from './agent/prompt.js';
 import type { ToolContext } from './agent/tools.js';
+import { BlockStore } from './blocks/store.js';
 import { configPath, loadConfig as readConfigFile } from './config.js';
 import type { Config, LoadResult } from './config.js';
 import { initialUi, reduce } from './focus.js';
@@ -23,9 +24,10 @@ import type { Size } from './layout.js';
 import { renderDiff } from './render/diff.js';
 import { FOOTER, composeFrame } from './render/frame.js';
 import type { Frame } from './render/frame.js';
+import { gitBranch, headerText } from './render/header.js';
 import { drawPanel } from './render/panel.js';
 import type { CardView, Transcript } from './render/panel.js';
-import { createFrameScheduler } from './render/schedule.js';
+import { createFrameScheduler, createRunningTicker } from './render/schedule.js';
 import type { ShellChoice } from './shell.js';
 import { inject } from './shellint/inject.js';
 import { hostModeDiff, hostModesFrom, trackModes } from './term/modes.js';
@@ -116,6 +118,14 @@ export async function runApp(o: {
     }
     const tracked = trackModes(session.mirror);
     const tokenizer = new InputTokenizer();
+    const store = new BlockStore(session.mirror);
+
+    let scroll = 0;
+    let newOutput = false;
+    let lastDocHeight = 0;
+    let branch: string | null = null;
+    let knownCwd: string | null = null;
+    let lastBlockId = 0;
 
     let lastFrame: Frame | null = null;
     let lastHostModes: HostModes | null = null;
@@ -133,13 +143,38 @@ export async function runApp(o: {
 
     const render = (): void => {
       if (stopped || resizePending) return;
+      ticker.sync(store.running !== null);
       const trackedModes = tracked.get();
+      const status = statusText();
+      const footerStatus =
+        status !== '' ? status : scroll > 0 && newOutput ? '↓ new output' : '';
       const frame = composeFrame(
         session.mirror,
         layout,
-        { title: 'blockterm', footer: FOOTER, footerStatus: statusText(), view: session.view },
+        {
+          title: headerText({
+            folder: store.cwd,
+            home: homedir(),
+            branch,
+            model: modelLabel ?? null,
+          }),
+          footer: FOOTER,
+          footerStatus,
+          view: session.view,
+          blocks: { store, scroll },
+        },
         trackedModes.cursorVisible,
       );
+      if (frame.blocksDocHeight !== undefined) {
+        const height = frame.blocksDocHeight;
+        const before = scroll;
+        if (scroll > 0 && height > lastDocHeight) scroll += height - lastDocHeight;
+        lastDocHeight = height;
+        const max = Math.max(0, lastDocHeight - layout.pty.rows);
+        if (scroll > max) scroll = max;
+        if (scroll === 0) newOutput = false;
+        if (scroll !== before) requestRender();
+      }
       const overlay = layout.panel.mode === 'overlay';
       const drawPanelNow =
         layout.panel.mode !== 'hidden' && layout.panel.rect !== null && (!overlay || ui.focus === 'panel');
@@ -186,7 +221,11 @@ export async function runApp(o: {
         }
         if (ui.inputShown !== false) ui = { ...ui, inputShown: false };
       }
-      const hostModes = hostModesFrom(session.mirror, trackedModes);
+      const hostModes = hostModesFrom(
+        session.mirror,
+        trackedModes,
+        session.view === 'blocks' && store.integrated,
+      );
       const out = hostModeDiff(lastHostModes, hostModes) + renderDiff(lastFrame, frame);
       if (out !== '') stdout.write(out);
       lastHostModes = hostModes;
@@ -197,14 +236,81 @@ export async function runApp(o: {
     const requestRender = (): void => {
       if (!stopped) scheduler.request();
     };
+    const ticker = createRunningTicker(requestRender);
+
+    const syncBranch = (): void => {
+      branch = knownCwd === null ? null : gitBranch(knownCwd);
+    };
+
+    const syncCwd = (): void => {
+      if (store.cwd === knownCwd) return;
+      knownCwd = store.cwd;
+      syncBranch();
+    };
+
+    const scrollBy = (delta: number): void => {
+      const max = Math.max(0, lastDocHeight - layout.pty.rows);
+      scroll = Math.max(0, Math.min(scroll + delta, max));
+      if (scroll === 0) newOutput = false;
+      requestRender();
+    };
 
     const route = (event: InputEvent): void => {
+      if (event.type === 'page-key' && session.view === 'blocks' && store.integrated) {
+        scrollBy(event.direction === 'up' ? layout.pty.rows - 1 : -(layout.pty.rows - 1));
+        return;
+      }
+
+      if (
+        event.type === 'mouse' &&
+        session.view === 'blocks' &&
+        store.integrated &&
+        session.mirror.modes.mouseTrackingMode === 'none'
+      ) {
+        const rect = layout.panel.rect;
+        const overPanel =
+          rect !== null &&
+          event.row >= rect.row &&
+          event.row < rect.row + rect.rows &&
+          event.col >= rect.col &&
+          event.col < rect.col + rect.cols;
+        const x = event.col - layout.origin.col;
+        const y = event.row - layout.origin.row;
+        const inPty = x >= 0 && x < layout.pty.cols && y >= 0 && y < layout.pty.rows;
+        if (!overPanel && inPty) {
+          const wheel = event.button & ~(4 | 8 | 16);
+          if (wheel === 64) scrollBy(3);
+          else if (wheel === 65) scrollBy(-3);
+          return;
+        }
+      }
+
+      if (
+        event.type === 'bytes' &&
+        event.data === '\x0c' &&
+        session.view === 'blocks' &&
+        store.integrated &&
+        store.isIdlePrompt()
+      ) {
+        store.clear();
+        scroll = 0;
+        newOutput = false;
+        requestRender();
+        return;
+      }
+
       const out = routeToPty(event, {
         modes: session.mirror.modes,
         tracked: tracked.get(),
         layout,
       });
-      if (out !== null) session.write(out);
+      if (out !== null) {
+        session.write(out);
+        if (event.type === 'bytes' || event.type === 'paste') {
+          scroll = 0;
+          newOutput = false;
+        }
+      }
     };
 
     const applyLayout = (): void => {
@@ -314,6 +420,9 @@ export async function runApp(o: {
       const ctx: ToolContext = {
         session,
         appCursor: () => session.mirror.modes.applicationCursorKeysMode,
+        get blocks() {
+          return store.integrated ? store : null;
+        },
       };
       requestRender();
 
@@ -486,7 +595,18 @@ export async function runApp(o: {
       }, 50);
     };
 
-    const parsed = session.onParsed(() => requestRender());
+    store.onChange(() => {
+      syncCwd();
+      const newest = store.blocks.at(-1)?.id ?? lastBlockId;
+      if (newest !== lastBlockId) syncBranch();
+      lastBlockId = newest;
+      if (scroll > 0) newOutput = true;
+      requestRender();
+    });
+    const parsed = session.onParsed(() => {
+      if (scroll > 0) newOutput = true;
+      requestRender();
+    });
     stdin.on('data', onData);
     stdout.on('resize', onResize);
     scheduler.request();
@@ -494,12 +614,14 @@ export async function runApp(o: {
     cleanup = (): void => {
       stopped = true;
       scheduler.dispose();
+      ticker.dispose();
       if (inputTimer !== null) clearTimeout(inputTimer);
       if (resizeTimer !== null) clearTimeout(resizeTimer);
       stdin.off('data', onData);
       stdout.off('resize', onResize);
       parsed.dispose();
       tracked.dispose();
+      store.dispose();
       session.dispose();
       injection.cleanup();
     };

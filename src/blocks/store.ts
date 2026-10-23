@@ -21,6 +21,7 @@ export interface Block {
 
 const MAX_LINES = 10000;
 const HALF = MAX_LINES / 2;
+export const MAX_BLOCKS = 200;
 
 function isBlank(cell: Cell): boolean {
   return cell.ch === '' || cell.ch === ' ';
@@ -188,6 +189,9 @@ export class BlockStore {
       lines,
       omitted: lost + capped,
     });
+    if (this.finished.length > MAX_BLOCKS) {
+      this.finished.splice(0, this.finished.length - MAX_BLOCKS);
+    }
     this.live = null;
     this.releaseMarkers();
   }
@@ -225,16 +229,24 @@ export class BlockStore {
     const buffer = this.mirror.buffer.active;
     const line = buffer.getLine(row);
     const cells: Cell[] = [];
+    const next = buffer.getLine(row + 1);
+    const wrapped = next ? next.isWrapped : false;
+    let keep = 0;
     if (line) {
       const reCell = buffer.getNullCell();
       for (let col = 0; col < this.mirror.cols; col++) {
         const cell = line.getCell(col, reCell);
-        cells.push(cell ? cellFrom(cell) : { ch: ' ', width: 1, sgr: '' });
+        const copied = cell ? cellFrom(cell) : { ch: ' ', width: 1 as const, sgr: '' };
+        cells.push(copied);
+        if (wrapped) {
+          if (!cell || cell.getCode() !== 0 || cell.getWidth() !== 1) keep = cells.length;
+        } else if (!isBlank(copied)) {
+          keep = cells.length;
+        }
       }
-      while (cells.length > 0 && isBlank(cells[cells.length - 1]!)) cells.pop();
+      cells.length = keep;
     }
-    const next = buffer.getLine(row + 1);
-    return { cells, wrapped: next ? next.isWrapped : false };
+    return { cells, wrapped };
   }
 
   private mark(row: number): IMarker | null {
