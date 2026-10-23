@@ -142,11 +142,6 @@ export async function runApp(o: {
 
     const render = (): void => {
       if (stopped || resizePending) return;
-      if (scroll > 0) {
-        const max = Math.max(0, lastDocHeight - layout.pty.rows);
-        if (scroll > max) scroll = max;
-        if (scroll === 0) newOutput = false;
-      }
       const trackedModes = tracked.get();
       const status = statusText();
       const footerStatus =
@@ -274,8 +269,9 @@ export async function runApp(o: {
         const y = event.row - layout.origin.row;
         const inPty = x >= 0 && x < layout.pty.cols && y >= 0 && y < layout.pty.rows;
         if (!overPanel && inPty) {
-          if (event.button === 64) scrollBy(3);
-          else if (event.button === 65) scrollBy(-3);
+          const wheel = event.button & ~(4 | 8 | 16);
+          if (wheel === 64) scrollBy(3);
+          else if (wheel === 65) scrollBy(-3);
           return;
         }
       }
@@ -283,6 +279,7 @@ export async function runApp(o: {
       if (
         event.type === 'bytes' &&
         event.data === '\x0c' &&
+        session.view === 'blocks' &&
         store.integrated &&
         store.isIdlePrompt()
       ) {
@@ -414,6 +411,9 @@ export async function runApp(o: {
       const ctx: ToolContext = {
         session,
         appCursor: () => session.mirror.modes.applicationCursorKeysMode,
+        get blocks() {
+          return store.integrated ? store : null;
+        },
       };
       requestRender();
 

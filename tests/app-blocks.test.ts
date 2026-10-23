@@ -229,3 +229,74 @@ test('ctrl+l while running is written to the pty', async () => {
   pty.exit(0);
   await expect(run).resolves.toBe(0);
 });
+
+test('the wheel does not reach the pty, including with modifier bits', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle(lines(20)));
+  await until(() => output(stdout).includes('L20'));
+
+  stdin.emit('data', '\x1b[<68;5;5M');
+  await until(() => output(stdout).includes('┌ $ ls'));
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('the wheel reaches the pty when the inner program asked for mouse', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle(lines(20)));
+  await until(() => output(stdout).includes('L20'));
+  pty.emit('\x1b[?1000h\x1b[?1006h');
+  await wait(30);
+
+  stdin.emit('data', '\x1b[<64;5;5M');
+  await until(() => pty.written.length > 0);
+  expect(pty.written.map(String).join('')).toMatch(/\x1b\[<64;\d+;\d+M/);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('shift+PgUp is written to the pty byte-exact without integration', async () => {
+  const { run, pty, stdin } = startApp();
+
+  stdin.emit('data', '\x1b[5;2~');
+  await until(() => pty.written.length > 0);
+  expect(pty.written).toEqual(['\x1b[5;2~']);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('typing a character resets the scroll position', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle(lines(20)));
+  await until(() => output(stdout).includes('L20'));
+  stdin.emit('data', '\x1b[<64;5;5M');
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', 'x');
+  await until(() => !output(stdout).includes('┌ $ ls'));
+  expect(output(stdout)).toContain('L20');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('ctrl+l in the fullscreen view goes to the pty', async () => {
+  const { run, pty, stdin } = startApp();
+
+  pty.emit('\x1b[?1049h');
+  pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07');
+  await wait(30);
+
+  stdin.emit('data', '\x0c');
+  await until(() => pty.written.map(String).join('').includes('\x0c'));
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});

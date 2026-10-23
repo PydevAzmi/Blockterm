@@ -24,7 +24,9 @@ Safety:
 
 How to work:
 - Use read_screen before acting, to see the current state.
-- Use send_keys with the key syntax: text is sent literally, keys are named like <Enter>, <Esc>, <C-c>; write <lt> for a literal <.
+- Use list_blocks and read_block to inspect finished command blocks.
+- Use run_command at an idle prompt to run a whole command as a new block.
+- Otherwise, use send_keys with the key syntax: text is sent literally, keys are named like <Enter>, <Esc>, <C-c>; write <lt> for a literal <.
 - Prefer one small step per send_keys call, then read the screen again.
 - Inside full-screen programs like vim, send the program's own keys (for example <Esc> then :w<Enter>).`;
 }

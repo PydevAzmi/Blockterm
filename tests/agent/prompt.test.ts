@@ -27,5 +27,11 @@ test('buildSystemPrompt: includes os, shell, cwd, view and program', () => {
   expect(p).toContain('vim');
 });
 
+test('buildSystemPrompt: run_command at idle prompts, send_keys elsewhere', () => {
+  const p = buildSystemPrompt(ctx);
+  expect(p).toMatch(/run_command[^]*idle prompt/i);
+  expect(p).toMatch(/otherwise[^]*send_keys/i);
+});
+
 test('buildSystemPrompt: stays short', () =>
   expect(buildSystemPrompt(ctx).length).toBeLessThan(1200));
