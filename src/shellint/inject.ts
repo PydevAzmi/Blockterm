@@ -74,7 +74,7 @@ export function inject(
   const noop = (): void => {};
   const off =
     env.BLOCKTERM_NO_INTEGRATION === '1' ||
-    kind === 'powershell' ||
+    (kind === 'powershell' && platform !== 'win32') ||
     kind === 'other' ||
     // Ruling AG: on macOS pwsh never runs the typed command, so leave its spawn untouched.
     (kind === 'pwsh' && platform === 'darwin') ||
@@ -113,11 +113,11 @@ export function inject(
   }
 
   const script = join(dir, 'blockterm.ps1');
-  writeFileSync(script, PWSH_INTEGRATION, { mode: 0o600 });
-  return {
-    file: shell.file,
-    args: ['-NoLogo', '-NoExit', '-Command', `. '${pwshQuote(script)}'`],
-    env: {},
-    cleanup,
-  };
+  // Windows PowerShell 5.1 reads a BOM-less script as ANSI; the BOM is harmless to pwsh 7.
+  writeFileSync(script, '\uFEFF' + PWSH_INTEGRATION, { mode: 0o600 });
+  // Run the text, not the file: a script file is subject to the user's execution policy
+  // (Restricted/AllSigned would block it), and -ExecutionPolicy Bypass would lift that policy
+  // for the user's whole session.
+  const command = `Invoke-Expression ([System.IO.File]::ReadAllText('${pwshQuote(script)}'))`;
+  return { file: shell.file, args: ['-NoLogo', '-NoExit', '-Command', command], env: {}, cleanup };
 }

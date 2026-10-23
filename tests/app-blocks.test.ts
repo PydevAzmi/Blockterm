@@ -132,10 +132,18 @@ async function until(fn: () => boolean, ms = 3000): Promise<void> {
 function startApp(o: {
   load?: () => LoadResult;
   model?: (config: Config, sessionId?: string) => ModelResult;
-} = {}): { run: Promise<number>; pty: FakePty; stdin: FakeStdin; stdout: FakeStdout } {
+  copy?: (text: string) => void;
+  cols?: number;
+  rows?: number;
+} = {}): {
+  run: Promise<number>;
+  pty: FakePty;
+  stdin: FakeStdin;
+  stdout: FakeStdout;
+} {
   const pty = new FakePty();
   const stdin = new FakeStdin();
-  const stdout = new FakeStdout(80, 24);
+  const stdout = new FakeStdout(o.cols ?? 80, o.rows ?? 24);
   const run = runApp({
     shell: { file: 'fake-shell', args: [] },
     stdin: stdin as unknown as NodeJS.ReadStream,
@@ -143,6 +151,7 @@ function startApp(o: {
     createSession: (_shell, size) => new TerminalSession(pty, size),
     loadConfig: o.load ?? (() => LOADED),
     ...(o.model !== undefined ? { modelFactory: o.model } : {}),
+    ...(o.copy !== undefined ? { copy: o.copy } : {}),
   });
   return { run, pty, stdin, stdout };
 }
@@ -186,6 +195,15 @@ function cycle(body: string, after = true, folder = FOLDER): string {
   const prompt = after ? '\x1b]133;A\x07$ \x1b]133;B\x07' : '';
   return (
     `${osc7(folder)}\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n` +
+    `\x1b]133;C\x07${body}\r\n\x1b]133;D;0\x07${prompt}`
+  );
+}
+
+function runBlock(command: string, body: string, after = true): string {
+  const prompt = after ? '\x1b]133;A\x07$ \x1b]133;B\x07' : '';
+  const typed = command.replace(/\r?\n/g, '\r\n');
+  return (
+    `${osc7(FOLDER)}\x1b]133;A\x07$ \x1b]133;B\x07${typed}\r\n` +
     `\x1b]133;C\x07${body}\r\n\x1b]133;D;0\x07${prompt}`
   );
 }
@@ -546,3 +564,453 @@ test('without config Explain error shows the hint and never calls the model', as
   pty.exit(0);
   await expect(run).resolves.toBe(0);
 });
+
+test('ctrl+up selects the newest block and ctrl+up again walks older', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(runBlock('first', lines(8)));
+  pty.emit(runBlock('second', 'x'));
+  await until(() => output(stdout).includes('┌ $ second'));
+  expect(output(stdout)).not.toContain('c copy · o output · r rerun · e explain · Esc back');
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy · o output · r rerun · e explain · Esc back'));
+  expect(pty.written).toEqual([]);
+  expect(stdout.writes.join('')).toContain('\x1b[0;1;36m');
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('┌ $ first'));
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('selecting an older block scrolls it into view', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(runBlock('first', lines(12)));
+  pty.emit(runBlock('second', lines(12)));
+  await until(() => output(stdout).includes('┌ $ second'));
+  expect(output(stdout)).not.toContain('┌ $ first');
+
+  stdin.emit('data', '\x1b[1;5A');
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('┌ $ first'));
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('revealing a block taller than the viewport settles in one scroll', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(runBlock('tall', lines(40)));
+  await until(() => output(stdout).includes('L40'));
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+
+  await wait(120);
+  const writes = stdout.writes.length;
+  const screen = output(stdout);
+  await wait(150);
+
+  expect(stdout.writes.length).toBe(writes);
+  expect(output(stdout)).toBe(screen);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('manual scrolling after a reveal is not undone by later renders', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(runBlock('first', lines(12)));
+  pty.emit(runBlock('tall', lines(40)));
+  pty.emit(runBlock('newest', 'x'));
+  await until(() => output(stdout).includes('┌ $ newest'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  await wait(120);
+  expect(output(stdout)).not.toContain('┌ $ first');
+
+  stdin.emit('data', '\x1b[5~');
+  await wait(100);
+  expect(output(stdout)).toContain('┌ $ first');
+  const pageWrites = stdout.writes.length;
+  const afterPage = output(stdout);
+  await wait(150);
+  expect(stdout.writes.length).toBe(pageWrites);
+  expect(output(stdout)).toBe(afterPage);
+
+  stdin.emit('data', '\x1b[F');
+  await wait(100);
+  expect(output(stdout)).toContain('┌ $ newest');
+
+  const beforeWheel = output(stdout);
+  stdin.emit('data', '\x1b[<64;5;5M');
+  await wait(100);
+  expect(output(stdout)).not.toBe(beforeWheel);
+  const wheelWrites = stdout.writes.length;
+  const afterWheel = output(stdout);
+  await wait(150);
+  expect(stdout.writes.length).toBe(wheelWrites);
+  expect(output(stdout)).toBe(afterWheel);
+
+  stdin.emit('data', '\x1b[H');
+  await wait(100);
+  expect(output(stdout)).toContain('┌ $ first');
+  const homeWrites = stdout.writes.length;
+  const afterHome = output(stdout);
+  await wait(150);
+  expect(stdout.writes.length).toBe(homeWrites);
+  expect(output(stdout)).toBe(afterHome);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+
+test('c copies the command and o copies the output', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
+
+  pty.emit(cycle('a\r\nb'));
+  pty.emit(failedCycle('boom', 'false'));
+  await until(() => output(stdout).includes('┌ $ false'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+
+  stdin.emit('data', 'c');
+  stdin.emit('data', 'o');
+  await until(() => copied.length === 2);
+  expect(copied).toEqual(['ls', 'a\nb']);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('c and o show copied in the footer for two seconds', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
+
+  pty.emit(cycle('a\r\nb'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+
+  stdin.emit('data', 'c');
+  await until(() => output(stdout).includes('copied'));
+  await wait(1000);
+  expect(output(stdout)).toContain('copied');
+
+  stdin.emit('data', 'o');
+  await until(() => copied.length === 2);
+  await wait(2200);
+  expect(output(stdout)).not.toContain('copied');
+  expect(output(stdout)).toContain('c copy');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('e explains the selected failed block', async () => {
+  const model = new MockLanguageModelV4({ doGenerate: async () => reply('Cause: boom.') });
+  const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
+
+  pty.emit(cycle('a'));
+  pty.emit(failedCycle('Error: boom'));
+  await until(() => output(stdout).includes('[Explain error]'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  stdin.emit('data', 'e');
+  await until(() => output(stdout).includes('Explain error: $ npm test (exit 1)'));
+  await until(() => output(stdout).includes('Cause: boom.'));
+  expect(model.doGenerateCalls).toHaveLength(1);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('e on a successful block shows nothing to explain for two seconds', async () => {
+  const model = new MockLanguageModelV4({ doGenerate: async () => reply('nope') });
+  const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  stdin.emit('data', 'e');
+  await until(() => output(stdout).includes('nothing to explain'));
+  await wait(1000);
+  expect(output(stdout)).toContain('nothing to explain');
+  expect(model.doGenerateCalls).toHaveLength(0);
+
+  await wait(1200);
+  expect(output(stdout)).not.toContain('nothing to explain');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('r reruns the selected command and exits selection', async () => {
+
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle('a'));
+  pty.emit(failedCycle('boom', 'false'));
+  await until(() => output(stdout).includes('┌ $ false'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  stdin.emit('data', 'r');
+  await until(() => pty.written.map(String).join('').includes('ls\r'));
+  await until(() => !output(stdout).includes('c copy'));
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('r at a non-idle prompt writes nothing and shows the notice', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle('a'));
+  pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07sleep\r\n\x1b]133;C\x07');
+  await until(() => output(stdout).includes('sleep'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  stdin.emit('data', 'r');
+  await until(() => output(stdout).includes('not at an idle prompt'));
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('Enter and Esc leave selection without writing, a second Esc reaches the pty', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  stdin.emit('data', '\r');
+  await until(() => !output(stdout).includes('c copy'));
+  expect(pty.written).toEqual([]);
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  stdin.emit('data', '\x1b');
+  await until(() => !output(stdout).includes('c copy'));
+  await wait(30);
+  expect(pty.written).toEqual([]);
+
+  stdin.emit('data', '\x1b');
+  await until(() => pty.written.map(String).join('').includes('\x1b'));
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('r on a multi-line command uses bracketed paste when enabled', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit('\x1b[?2004h');
+  pty.emit(runBlock('echo a\necho b', 'a\r\nb'));
+  await until(() => output(stdout).includes('┌ $ echo a'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  stdin.emit('data', 'r');
+  await until(() => pty.written.length > 0);
+  expect(pty.written.map(String).join('')).toBe('\x1b[200~echo a\necho b\x1b[201~\r');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('r on a multi-line command refuses without bracketed paste', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit('\x1b[?2004l');
+  pty.emit(runBlock('echo a\necho b', 'a\r\nb'));
+  await until(() => output(stdout).includes('┌ $ echo a'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  stdin.emit('data', 'r');
+  await until(() => output(stdout).includes('multi-line rerun needs bracketed paste'));
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('a single-line rerun writes the command and Enter when bracketed paste is enabled', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit('\x1b[?2004h');
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+  stdin.emit('data', 'r');
+  await until(() => pty.written.length > 0);
+  expect(pty.written.map(String).join('')).toBe('ls\r');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('selection clears when the block cap drops the selected block', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+
+  let burst = '';
+  for (let i = 0; i < 200; i += 1) burst += runBlock(`cmd${i}`, 'x');
+  pty.emit(burst);
+  await until(() => !output(stdout).includes('c copy'), 10000);
+  await until(() => output(stdout).includes('F1 help'), 2000);
+  expect(output(stdout)).toContain('F1 help');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+
+test('selection survives new blocks arriving', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+  stdin.emit('data', '\x1b[1;5A');
+  await until(() => output(stdout).includes('c copy'));
+
+  pty.emit(runBlock('later', 'x'));
+  await until(() => output(stdout).includes('┌ $ later'));
+  expect(output(stdout)).toContain('c copy');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('ctrl+down with nothing selected passes through to the pty', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', '\x1b[1;5B');
+  await until(() => pty.written.length > 0);
+  expect(pty.written).toEqual(['\x1b[1;5B']);
+  expect(output(stdout)).not.toContain('c copy');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('clicking a block row selects it', async () => {
+
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(failedCycle('Error: boom'));
+  await until(() => output(stdout).includes('┌ $ npm test'));
+  const rows = renderScreen(stdout);
+  const row = rows.findIndex(line => line.includes('┌ $ npm test'));
+  expect(row).toBeGreaterThanOrEqual(0);
+
+  stdin.emit('data', `\x1b[<0;10;${row + 1}M`);
+  stdin.emit('data', `\x1b[<0;10;${row + 1}m`);
+  await until(() => output(stdout).includes('c copy'));
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('clicking a block row does not select while # input is open', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+  stdin.emit('data', '#');
+  await until(() => output(stdout).includes('# '));
+
+  const rows = renderScreen(stdout);
+  const row = rows.findIndex(line => line.includes('┌ $ ls'));
+  stdin.emit('data', `\x1b[<0;10;${row + 1}M`);
+  stdin.emit('data', `\x1b[<0;10;${row + 1}m`);
+  await wait(80);
+
+  expect(output(stdout)).not.toContain('c copy');
+  expect(output(stdout)).toContain('# ');
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('clicking a block row does not select while the panel has focus', async () => {
+  const { run, pty, stdin, stdout } = startApp({ cols: 160, rows: 24 });
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('┌ $ ls'));
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+
+  const rows = renderScreen(stdout);
+  const row = rows.findIndex(line => line.includes('┌ $ ls'));
+  stdin.emit('data', `\x1b[<0;10;${row + 1}M`);
+  stdin.emit('data', `\x1b[<0;10;${row + 1}m`);
+  await wait(80);
+
+  expect(output(stdout)).not.toContain('c copy');
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('ctrl+arrows pass through without integration, in fullscreen and with no blocks', async () => {
+  const plain = startApp();
+  plain.stdin.emit('data', '\x1b[1;5A');
+  await until(() => plain.pty.written.length > 0);
+  expect(plain.pty.written).toEqual(['\x1b[1;5A']);
+  plain.pty.exit(0);
+  await expect(plain.run).resolves.toBe(0);
+
+  const full = startApp();
+  full.pty.emit('\x1b[?1049h');
+  await wait(30);
+  full.stdin.emit('data', '\x1b[1;5B');
+  await until(() => full.pty.written.length > 0);
+  expect(full.pty.written).toEqual(['\x1b[1;5B']);
+  full.pty.exit(0);
+  await expect(full.run).resolves.toBe(0);
+
+  const empty = startApp();
+  empty.pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07');
+  await wait(30);
+  empty.stdin.emit('data', '\x1b[1;5A');
+  await until(() => empty.pty.written.length > 0);
+  expect(empty.pty.written).toEqual(['\x1b[1;5A']);
+  empty.pty.exit(0);
+  await expect(empty.run).resolves.toBe(0);
+});
+

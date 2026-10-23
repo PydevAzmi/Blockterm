@@ -9,13 +9,33 @@ Each command's output becomes a block with its exit status and how long it took.
 
 Scroll with the mouse wheel or `shift+PgUp`/`shift+PgDn`. At an idle prompt, `ctrl+l` clears the blocks.
 
-Blocks work in bash (including Git Bash on Windows; macOS bash 3.2), zsh and PowerShell 7 (Windows and Linux; not macOS yet). Windows PowerShell 5.1 and WSL bash run without blocks for now. Set `BLOCKTERM_NO_INTEGRATION=1` to turn blocks off.
+Blocks work in bash (including Git Bash on Windows; macOS bash 3.2), zsh, PowerShell 7 (Windows and Linux; not macOS yet) and Windows PowerShell 5.1 (no profile changes and no execution-policy change; the integration script runs as-is). WSL bash runs without blocks for now. Set `BLOCKTERM_NO_INTEGRATION=1` to turn blocks off.
+
+## Selecting, copying and rerunning
+
+Press `ctrl+↑` / `ctrl+↓` to select older / newer blocks, or click a block. With a block selected:
+
+| Key | Action |
+| --- | --- |
+| `c` | copy the command |
+| `o` | copy the output |
+| `r` | rerun the command (only at an idle prompt) |
+| `e` | explain a failed command in the agent panel |
+| `Enter` / `Esc` | back to the prompt |
+
+`PgUp` / `PgDn` / `Home` / `End` scroll the blocks while one is selected.
+
+Copying writes OSC 52 to the terminal and also pipes to the native clipboard tool: `clip` on Windows, `pbcopy` on macOS, `wl-copy` on Wayland, or `xclip -selection clipboard` on X11. Over ssh, OSC 52 sets the clipboard of the terminal you are sitting at when it supports it. In tmux, add `set -g set-clipboard on` to `~/.tmux.conf`.
+
+## Help
+
+Press `F1` for the key list. `F1` or `Esc` closes it.
 
 ## `#` suggestions
 
 At an empty prompt, type `#`, write what you want in plain words, and press `Enter`. The suggested command is typed into your prompt for you to edit; it never runs on its own.
 
-A failed command's block ends with `[Explain error]`. Click it to open the agent panel with an explanation of what went wrong (keyboard access comes with block selection).
+A failed command's block ends with `[Explain error]`. Click it, or select the block and press `e`, to open the agent panel with an explanation of what went wrong.
 
 ## Build from source
 

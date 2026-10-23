@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeAll, expect, test } from 'vitest';
 
@@ -53,6 +53,13 @@ const pwshPath =
     : isOnPath('pwsh', process.env, process.platform)
       ? 'pwsh'
       : null;
+
+const powershellPath =
+  process.platform === 'win32'
+    ? isOnPath('powershell.exe', process.env, process.platform)
+      ? 'powershell.exe'
+      : firstExisting(['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'])
+    : null;
 
 // PS0 only exists in bash >= 4.4 (macOS ships 3.2), so the ps0 variants must skip there.
 function bashSupportsPs0(file: string): boolean {
@@ -107,7 +114,11 @@ function launch(
 ): Launched {
   const home = tempDir('blockterm-int-home-');
   const work = tempDir('blockterm-int-work-');
-  if (rcName !== '') writeFileSync(join(home, rcName), rcContent);
+  if (rcName !== '') {
+    const rcPath = join(home, rcName);
+    mkdirSync(dirname(rcPath), { recursive: true });
+    writeFileSync(rcPath, rcContent);
+  }
 
   const env: Record<string, string | undefined> = {
     ...process.env,
@@ -343,3 +354,67 @@ test.skipIf(pwshPath === null || process.platform === 'darwin')('pwsh: integrati
     stop(launched);
   }
 }, 60000);
+
+const POWERSHELL_PROFILE = 'Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1';
+
+test.skipIf(powershellPath === null)(
+  'Windows PowerShell 5.1: integration records blocks, exit codes and ends the session',
+  async () => {
+    const launched = launch(powershellPath!, '', '');
+    const { session, store } = launched;
+    let exited: number | undefined;
+    session.onExit(code => {
+      exited = code;
+    });
+    try {
+      await waitFor(() => store.integrated && store.promptRow !== null, 40000);
+
+      session.write('echo hi\r');
+      await waitFor(() => store.blocks.length >= 1 && store.promptRow !== null, 40000);
+      const ok = store.blocks[0]!;
+      expect(ok.command).toContain('echo hi');
+      expect(ok.exitCode).toBe(0);
+      expect(blockText(ok)).toContain('hi');
+
+      session.write('cmd /c exit 2\r');
+      await waitFor(() => store.blocks.length >= 2 && store.promptRow !== null, 40000);
+      expect(store.blocks[1]!.exitCode).toBe(2);
+
+      session.write('exit 0\r');
+      await waitFor(() => exited !== undefined, 40000);
+      expect(exited).toBe(0);
+    } catch (err) {
+      dump(launched, 'Windows PowerShell 5.1');
+      throw err;
+    } finally {
+      stop(launched);
+    }
+  },
+  60000,
+);
+
+test.skipIf(powershellPath === null)(
+  'Windows PowerShell 5.1: a custom profile prompt with PSReadLine still records blocks',
+  async () => {
+    const profile = "Set-PSReadLineOption -HistoryNoDuplicates\nfunction prompt { 'MYPROMPT> ' }\n";
+    const launched = launch(powershellPath!, POWERSHELL_PROFILE, profile);
+    const { session, store } = launched;
+    try {
+      await waitFor(() => store.integrated && store.promptRow !== null, 40000);
+      await waitFor(() => screenText(session).includes('MYPROMPT>'), 40000);
+
+      session.write('echo hi\r');
+      await waitFor(() => store.blocks.length >= 1 && store.promptRow !== null, 40000);
+      expect(store.blocks[0]!.command).toContain('echo hi');
+      expect(store.blocks[0]!.exitCode).toBe(0);
+      expect(blockText(store.blocks[0]!)).toContain('hi');
+      expect(screenText(session)).toContain('MYPROMPT>');
+    } catch (err) {
+      dump(launched, 'Windows PowerShell 5.1 profile');
+      throw err;
+    } finally {
+      stop(launched);
+    }
+  },
+  60000,
+);

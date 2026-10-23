@@ -7,6 +7,7 @@ export interface PanelUi {
   input: string;
   inputTruncated?: boolean;
   inputShown?: boolean;
+  help?: boolean;
   mode: 'idle' | 'busy';
   card: null | {
     keys: string;
@@ -144,6 +145,13 @@ function panelPaste(ui: PanelUi, text: string): { ui: PanelUi; actions: Action[]
 }
 
 export function reduce(ui: PanelUi, e: InputEvent): { ui: PanelUi; actions: Action[] } {
+  if (ui.help === true) {
+    if (e.type === 'help-key') return { ui: { ...ui, help: false }, actions: [] };
+    if (e.type === 'agent-key') return toggle(ui);
+    if (e.type === 'bytes' && e.data === ESC) return { ui: { ...ui, help: false }, actions: [] };
+    return { ui, actions: [] };
+  }
+
   switch (e.type) {
     case 'agent-key':
       return toggle(ui);
@@ -151,7 +159,7 @@ export function reduce(ui: PanelUi, e: InputEvent): { ui: PanelUi; actions: Acti
       if (ui.focus === 'panel') return { ui, actions: [] };
       return { ui, actions: [{ type: 'to-pty', event: e }] };
     case 'help-key':
-      return { ui, actions: [] };
+      return { ui: { ...ui, help: true }, actions: [] };
     case 'page-key':
       if (ui.focus === 'terminal') return { ui, actions: [{ type: 'to-pty', event: e }] };
       return { ui, actions: [] };

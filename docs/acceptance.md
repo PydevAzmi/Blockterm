@@ -93,6 +93,20 @@ model.
 - [ ] **Explain error on a failing `npm test`.** Run `npm test` until it fails, click
   `[Explain error]` on the block, and check the panel shows an explanation.
 
+## Slice 7: PS 5.1, selection and help
+
+Owner checks for Windows PowerShell 5.1 integration, block selection, copying and F1 help. Run these
+by hand in a real terminal.
+
+- [ ] **Windows PowerShell 5.1 with oh-my-posh.** Open blockterm in PS 5.1 with an oh-my-posh prompt:
+  the prompt looks unchanged and each command produces a block with its exit code and duration.
+- [ ] **`ctrl+↑` / `ctrl+↓` and `c` / `o` / `r` / `e`.** Select older and newer blocks, copy the
+  command and the output, rerun a command at an idle prompt, and explain a failed block.
+- [ ] **Copy over ssh via OSC 52.** ssh to a host from Windows Terminal or iTerm2, select a block,
+  press `c`, and paste into a local app. In tmux, `set -g set-clipboard on` is set.
+- [ ] **F1 help.** Press `F1`, check the key list, close it with `F1` and with `Esc`, and confirm the
+  next `Esc` reaches the shell.
+
 ## Agent (slices 3–5)
 
 Owner checks for the agent panel, the approval card and the write tools. Run these with a real

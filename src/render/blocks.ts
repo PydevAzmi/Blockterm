@@ -8,6 +8,13 @@ export interface BlocksView {
   store: BlockStore;
   scroll: number;
   hash?: { text: string; cursor: boolean } | null;
+  selected?: number | null;
+}
+
+export interface BlockRow {
+  id: number;
+  top: number;
+  height: number;
 }
 
 export interface BlockAction {
@@ -23,13 +30,26 @@ export interface BlocksResult {
   cursor: { row: number; col: number } | null;
   docHeight: number;
   actions: BlockAction[];
+  blockRows: BlockRow[];
 }
 
 const EXPLAIN_LABEL = '[Explain error]';
 const EXPLAIN_WIDTH = 15;
+const SELECTED_SGR = '1;36';
 
 function blank(sgr = ''): Cell {
   return { ch: ' ', width: 1, sgr };
+}
+
+function highlightRow(row: Cell[], index: number, last: number): Cell[] {
+  if (index === 0 || index === last) return row.map(cell => ({ ...cell, sgr: SELECTED_SGR }));
+  const out = row.slice();
+  const left = out[0];
+  if (left !== undefined) out[0] = { ...left, sgr: SELECTED_SGR };
+  const rightIndex = out.length - 1;
+  const right = out[rightIndex];
+  if (right !== undefined) out[rightIndex] = { ...right, sgr: SELECTED_SGR };
+  return out;
 }
 
 function charWidth(ch: string): 1 | 2 {
@@ -298,11 +318,19 @@ export function composeBlocks(
   const buffer = mirror.buffer.active;
   const running = view.store.running;
 
-  const sections: { start: number; rows: Cell[][]; actions: BlockAction[] }[] = [];
+  const sections: {
+    start: number;
+    rows: Cell[][];
+    actions: BlockAction[];
+    selected: boolean;
+  }[] = [];
+  const blockRows: BlockRow[] = [];
   let docHeight = 0;
   for (const block of view.store.blocks) {
     const cached = cachedRows(block, cols, inner, area.rows, now);
-    sections.push({ start: docHeight, rows: cached.rows, actions: cached.actions });
+    const selected = view.selected === block.id;
+    sections.push({ start: docHeight, rows: cached.rows, actions: cached.actions, selected });
+    blockRows.push({ id: block.id, top: docHeight, height: cached.rows.length });
     docHeight += cached.rows.length;
   }
 
@@ -378,7 +406,11 @@ export function composeBlocks(
   };
 
   for (const section of sections) {
-    take(section.start, section.start + section.rows.length, offset => section.rows[offset]);
+    take(section.start, section.start + section.rows.length, offset => {
+      const row = section.rows[offset];
+      if (row === undefined || !section.selected) return row;
+      return highlightRow(row, offset, section.rows.length - 1);
+    });
   }
   if (liveHeader !== null) take(headerAt, headerAt + 1, () => liveHeader!);
   if (liveStart !== null) {
@@ -404,5 +436,5 @@ export function composeBlocks(
     }
   }
 
-  return { rows, cursor, docHeight, actions };
+  return { rows, cursor, docHeight, actions, blockRows };
 }
