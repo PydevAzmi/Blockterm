@@ -18,7 +18,10 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SHELL = process.platform === 'win32' ? 'powershell.exe' : '/bin/sh';
 const COLS = 80;
 const ROWS = 24;
-const FOOTER = 'F1 help · ctrl+k agent';
+// No config on purpose, so the run does not depend on the machine's own config.
+const NO_CONFIG = fileURLToPath(new URL('../../.blockterm-no-config.json', import.meta.url));
+const MODE = SHELL === '/bin/sh' ? '(sh)' : '(powershell)';
+const STATUS = 'run blockterm setup';
 
 function screen(host: XtermTerminal): string {
   const buffer = host.buffer.active;
@@ -44,7 +47,7 @@ test('blockterm runs a real shell end to end', async () => {
     cols: COLS,
     rows: ROWS,
     cwd: ROOT,
-    env: process.env,
+    env: { ...process.env, BLOCKTERM_CONFIG: NO_CONFIG },
   });
 
   let raw = '';
@@ -66,7 +69,7 @@ test('blockterm runs a real shell end to end', async () => {
     await waitFor(() => host.buffer.active.type === 'alternate', 15000);
     await waitFor(() => {
       const lines = screen(host).split('\n');
-      return lines[ROWS - 1]!.startsWith('(') && lines[ROWS - 1]!.includes(FOOTER);
+      return lines[ROWS - 1]!.startsWith(MODE) && lines[ROWS - 1]!.endsWith(STATUS);
     }, 15000);
 
     await waitFor(() => /[#$>]/.test(screen(host)), 10000);
