@@ -27,7 +27,7 @@ import type { Frame } from './render/frame.js';
 import { gitBranch, headerText } from './render/header.js';
 import { drawPanel } from './render/panel.js';
 import type { CardView, Transcript } from './render/panel.js';
-import { createFrameScheduler } from './render/schedule.js';
+import { createFrameScheduler, createRunningTicker } from './render/schedule.js';
 import type { ShellChoice } from './shell.js';
 import { inject } from './shellint/inject.js';
 import { hostModeDiff, hostModesFrom, trackModes } from './term/modes.js';
@@ -125,6 +125,7 @@ export async function runApp(o: {
     let lastDocHeight = 0;
     let branch: string | null = null;
     let knownCwd: string | null = null;
+    let lastBlockId = 0;
 
     let lastFrame: Frame | null = null;
     let lastHostModes: HostModes | null = null;
@@ -142,6 +143,7 @@ export async function runApp(o: {
 
     const render = (): void => {
       if (stopped || resizePending) return;
+      ticker.sync(store.running !== null);
       const trackedModes = tracked.get();
       const status = statusText();
       const footerStatus =
@@ -164,9 +166,11 @@ export async function runApp(o: {
         trackedModes.cursorVisible,
       );
       if (frame.blocksDocHeight !== undefined) {
-        lastDocHeight = frame.blocksDocHeight;
-        const max = Math.max(0, lastDocHeight - layout.pty.rows);
+        const height = frame.blocksDocHeight;
         const before = scroll;
+        if (scroll > 0 && height > lastDocHeight) scroll += height - lastDocHeight;
+        lastDocHeight = height;
+        const max = Math.max(0, lastDocHeight - layout.pty.rows);
         if (scroll > max) scroll = max;
         if (scroll === 0) newOutput = false;
         if (scroll !== before) requestRender();
@@ -232,11 +236,16 @@ export async function runApp(o: {
     const requestRender = (): void => {
       if (!stopped) scheduler.request();
     };
+    const ticker = createRunningTicker(requestRender);
+
+    const syncBranch = (): void => {
+      branch = knownCwd === null ? null : gitBranch(knownCwd);
+    };
 
     const syncCwd = (): void => {
       if (store.cwd === knownCwd) return;
       knownCwd = store.cwd;
-      branch = knownCwd === null ? null : gitBranch(knownCwd);
+      syncBranch();
     };
 
     const scrollBy = (delta: number): void => {
@@ -588,6 +597,9 @@ export async function runApp(o: {
 
     store.onChange(() => {
       syncCwd();
+      const newest = store.blocks.at(-1)?.id ?? lastBlockId;
+      if (newest !== lastBlockId) syncBranch();
+      lastBlockId = newest;
       if (scroll > 0) newOutput = true;
       requestRender();
     });
@@ -602,6 +614,7 @@ export async function runApp(o: {
     cleanup = (): void => {
       stopped = true;
       scheduler.dispose();
+      ticker.dispose();
       if (inputTimer !== null) clearTimeout(inputTimer);
       if (resizeTimer !== null) clearTimeout(resizeTimer);
       stdin.off('data', onData);

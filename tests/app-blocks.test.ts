@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { expect, test } from 'vitest';
 
@@ -131,10 +133,14 @@ function osc7(path: string): string {
   return `\x1b]7;file://host${url}\x07`;
 }
 
-function cycle(body: string, after = true): string {
+function osc7Path(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
+}
+
+function cycle(body: string, after = true, folder = FOLDER): string {
   const prompt = after ? '\x1b]133;A\x07$ \x1b]133;B\x07' : '';
   return (
-    `${osc7(FOLDER)}\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n` +
+    `${osc7(folder)}\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n` +
     `\x1b]133;C\x07${body}\r\n\x1b]133;D;0\x07${prompt}`
   );
 }
@@ -285,6 +291,51 @@ test('typing a character resets the scroll position', async () => {
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);
+});
+
+test('new output while scrolled up keeps the same rows in place', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit(cycle(lines(20)));
+  await until(() => output(stdout).includes('L20'));
+
+  stdin.emit('data', '\x1b[<64;5;5M');
+  await until(() => output(stdout).includes('┌ $ ls'));
+  const before = renderScreen(stdout);
+  const index = before.findIndex(row => row.includes('L20'));
+  expect(index).toBeGreaterThan(0);
+
+  pty.emit('more\r\nmore2\r\n');
+  await until(() => output(stdout).includes('↓ new output'));
+  await until(() => (renderScreen(stdout)[index] ?? '').includes('L20'));
+  const after = renderScreen(stdout);
+  expect(after[index]).toContain('L20');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('the header re-reads the git branch when a block finishes', async () => {
+  const root = mkdtempSync(join(process.cwd(), '.blockterm-branch-'));
+  mkdirSync(join(root, '.git'));
+  writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  const folder = osc7Path(root);
+
+  try {
+    const { run, pty, stdout } = startApp();
+
+    pty.emit(cycle('a', true, folder));
+    await until(() => output(stdout).includes('(main)'));
+
+    writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/dev\n');
+    pty.emit(cycle('b', true, folder));
+    await until(() => output(stdout).includes('(dev)'));
+
+    pty.exit(0);
+    await expect(run).resolves.toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('ctrl+l in the fullscreen view goes to the pty', async () => {

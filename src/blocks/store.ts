@@ -21,6 +21,7 @@ export interface Block {
 
 const MAX_LINES = 10000;
 const HALF = MAX_LINES / 2;
+export const MAX_BLOCKS = 200;
 
 function isBlank(cell: Cell): boolean {
   return cell.ch === '' || cell.ch === ' ';
@@ -188,6 +189,9 @@ export class BlockStore {
       lines,
       omitted: lost + capped,
     });
+    if (this.finished.length > MAX_BLOCKS) {
+      this.finished.splice(0, this.finished.length - MAX_BLOCKS);
+    }
     this.live = null;
     this.releaseMarkers();
   }

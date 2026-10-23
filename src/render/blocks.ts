@@ -137,6 +137,7 @@ function markerRow(innerWidth: number, omitted: number): Cell[] {
 
 function reflow(lines: SnapLine[], inner: number): Cell[][] {
   if (inner <= 0) return [];
+  reflows += 1;
 
   const logical: Cell[][] = [];
   let joined: Cell[] = [];
@@ -222,62 +223,120 @@ function liveRow(mirror: Terminal, row: number, inner: number): Cell[] {
   return bordered(cells, inner + 2);
 }
 
+interface CachedBlock {
+  inner: number;
+  areaRows: number;
+  rows: Cell[][];
+}
+
+const blockCache = new WeakMap<Block, CachedBlock>();
+let reflows = 0;
+
+export function reflowCount(): number {
+  return reflows;
+}
+
+function cachedRows(
+  block: Block,
+  cols: number,
+  inner: number,
+  areaRows: number,
+  now: number,
+): Cell[][] {
+  const hit = blockCache.get(block);
+  if (hit !== undefined && hit.inner === inner && hit.areaRows === areaRows) return hit.rows;
+
+  const rows = [
+    topBorder(block, cols, block.endedAt ?? now),
+    ...cappedBody(block, cols, inner, areaRows),
+    bottomBorder(cols),
+  ];
+  if (block.endedAt !== null) blockCache.set(block, { inner, areaRows, rows });
+  return rows;
+}
+
 export function composeBlocks(
   mirror: Terminal,
   view: BlocksView,
   area: Size,
   now: number,
 ): BlocksResult {
-  const inner = Math.max(0, area.cols - 2);
-  const doc: Cell[][] = [];
-
-  for (const block of view.store.blocks) {
-    doc.push(topBorder(block, area.cols, now));
-    doc.push(...cappedBody(block, area.cols, inner, area.rows));
-    doc.push(bottomBorder(area.cols));
-  }
-
-  let cursorDoc: { row: number; col: number } | null = null;
+  const cols = area.cols;
+  const inner = Math.max(0, cols - 2);
   const buffer = mirror.buffer.active;
   const running = view.store.running;
-  if (running !== null) {
-    doc.push(
-      topBorder(
-        {
-          id: 0,
-          command: running.command,
-          cwd: null,
-          exitCode: null,
-          startedAt: running.startedAt,
-          endedAt: null,
-          lines: [],
-          omitted: 0,
-        },
-        area.cols,
-        now,
-      ),
-    );
+
+  const sections: { start: number; rows: Cell[][] }[] = [];
+  let docHeight = 0;
+  for (const block of view.store.blocks) {
+    const rows = cachedRows(block, cols, inner, area.rows, now);
+    sections.push({ start: docHeight, rows });
+    docHeight += rows.length;
   }
+
+  let headerAt = -1;
+  let liveHeader: Cell[] | null = null;
+  if (running !== null) {
+    liveHeader = topBorder(
+      {
+        id: 0,
+        command: running.command,
+        cwd: null,
+        exitCode: null,
+        startedAt: running.startedAt,
+        endedAt: null,
+        lines: [],
+        omitted: 0,
+      },
+      cols,
+      now,
+    );
+    headerAt = docHeight;
+    docHeight += 1;
+  }
+
   const liveStart = running?.startRow ?? view.store.promptRow;
+  let liveFrom = 0;
+  let liveBase = docHeight;
+  let liveCount = 0;
+  let cursorDoc: { row: number; col: number } | null = null;
   if (liveStart !== null) {
     const cursorRow = buffer.baseY + buffer.cursorY;
-    const from = Math.max(0, Math.min(liveStart, cursorRow));
-    // ponytail: live rows are unbounded per frame; elide like finished blocks if long-running output gets slow.
-    for (let row = from; row <= cursorRow; row += 1) doc.push(liveRow(mirror, row, inner));
+    liveFrom = Math.max(0, Math.min(liveStart, cursorRow));
+    liveCount = cursorRow - liveFrom + 1;
+    liveBase = docHeight;
+    docHeight += liveCount;
     cursorDoc = {
-      row: doc.length - 1,
-      col: Math.min(1 + buffer.cursorX, Math.max(0, area.cols - 2)),
+      row: docHeight - 1,
+      col: Math.min(1 + buffer.cursorX, Math.max(0, cols - 2)),
     };
   }
 
-  const docHeight = doc.length;
   const maxScroll = Math.max(0, docHeight - area.rows);
   const scroll = Math.min(Math.max(0, Math.floor(view.scroll)), maxScroll);
   const start = Math.max(0, docHeight - area.rows - scroll);
-  const rows = doc.slice(start, start + area.rows);
+  const end = Math.min(docHeight, start + area.rows);
+
+  const rows: Cell[][] = [];
+  const take = (from: number, to: number, source: (offset: number) => Cell[] | undefined): void => {
+    const first = Math.max(start, from);
+    const last = Math.min(end, to);
+    for (let at = first; at < last; at += 1) {
+      const row = source(at - from);
+      if (row !== undefined) rows.push(row);
+    }
+  };
+
+  for (const section of sections) {
+    take(section.start, section.start + section.rows.length, offset => section.rows[offset]);
+  }
+  if (liveHeader !== null) take(headerAt, headerAt + 1, () => liveHeader!);
+  if (liveStart !== null) {
+    take(liveBase, liveBase + liveCount, offset => liveRow(mirror, liveFrom + offset, inner));
+  }
 
   const cursor =
-    cursorDoc !== null && cursorDoc.row >= start && cursorDoc.row < start + rows.length
+    cursorDoc !== null && cursorDoc.row >= start && cursorDoc.row < end
       ? { row: cursorDoc.row - start, col: cursorDoc.col }
       : null;
 

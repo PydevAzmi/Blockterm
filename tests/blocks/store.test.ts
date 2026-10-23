@@ -204,6 +204,22 @@ test('output on the D row is captured as the last line', async () => {
   expect(store.blocks[0]!.lines.map(text)).toEqual(['x']);
 });
 
+test('finished blocks cap at the newest 200', async () => {
+  const mirror = makeMirror(20, 10, 2000);
+  const store = new BlockStore(mirror);
+
+  for (let i = 0; i < 201; i += 1) {
+    await write(
+      mirror,
+      `\x1b]133;B\x07cmd${i}\r\n\x1b]133;C\x07out${i}\r\n\x1b]133;D;0\x07`,
+    );
+  }
+
+  expect(store.blocks).toHaveLength(200);
+  expect(store.blocks[0]!.command).toBe('cmd1');
+  expect(store.blocks[199]!.command).toBe('cmd200');
+});
+
 test('scrollback eviction: omitted counts the lost lines', async () => {
   const mirror = makeMirror(20, 24, 1000);
   const store = new BlockStore(mirror);

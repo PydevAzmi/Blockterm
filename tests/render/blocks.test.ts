@@ -6,7 +6,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 
 import { BlockStore } from '../../src/blocks/store.js';
 import { computeLayout } from '../../src/layout.js';
-import { composeBlocks } from '../../src/render/blocks.js';
+import { composeBlocks, reflowCount } from '../../src/render/blocks.js';
 import { composeFrame, FOOTER, type Cell } from '../../src/render/frame.js';
 
 const { Terminal: XtermTerminal } = xterm;
@@ -256,6 +256,37 @@ test('wrapped line: a written space at the wrap point survives reflow', async ()
     .map(row => rowText(row).slice(1, 19).trimEnd())
     .join('');
   expect(joined).toContain('a b');
+});
+
+test('finished blocks are memoized: a second frame does not reflow', async () => {
+  const { mirror, store } = await finishedBlock({
+    command: 'ls',
+    body: 'a\r\nb',
+    after: '\x1b]133;A\x07$ ',
+  });
+  const view = { store, scroll: 0 };
+  const first = composeBlocks(mirror, view, { cols: 40, rows: 12 }, 5000);
+  const calls = reflowCount();
+  expect(calls).toBeGreaterThan(0);
+
+  const second = composeBlocks(mirror, view, { cols: 40, rows: 12 }, 6000);
+  expect(second).toEqual(first);
+  expect(reflowCount()).toBe(calls);
+});
+
+test('live region: 5000 rows keep the full doc height but only the window is read', async () => {
+  const mirror = makeMirror(40, 10, 6000);
+  const store = new BlockStore(mirror, () => 1000);
+  const body = Array.from({ length: 5000 }, (_, i) => `L${i + 1}`).join('\r\n');
+  await write(mirror, `\x1b]133;B\x07seq\r\n\x1b]133;C\x07${body}`);
+
+  const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 10 }, 2000);
+
+  expect(result.docHeight).toBe(5001);
+  expect(result.rows).toHaveLength(10);
+  expect(rowText(result.rows[8]!)).toContain('L4999');
+  expect(rowText(result.rows[9]!)).toContain('L5000');
+  expect(result.cursor).toEqual({ row: 9, col: 6 });
 });
 
 test('frame uses chrome.now for the running header', async () => {
