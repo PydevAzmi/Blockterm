@@ -279,6 +279,30 @@ for (const mode of BASH_MODES) {
     },
     40000,
   );
+
+  test.skipIf(bashPath === null || (mode.name === 'ps0' && !bashPs0))(
+    `bash [${mode.name}]: commands left out of history still finish their blocks`,
+    async () => {
+      const launched = launch(bashPath!, '.bashrc', mode.prelude + 'HISTCONTROL=ignoreboth\n', mode.env);
+      const { session, store } = launched;
+      try {
+        await waitFor(() => store.integrated && store.promptRow !== null, 20000);
+        session.write('true\r');
+        await waitFor(() => store.blocks.length >= 1, 20000);
+        session.write('true\r');
+        await waitFor(() => store.blocks.length >= 2, 20000);
+        session.write(' true\r');
+        await waitFor(() => store.blocks.length >= 3, 20000);
+        expect(store.blocks.map(b => b.exitCode)).toEqual([0, 0, 0]);
+      } catch (err) {
+        dump(launched, `bash [${mode.name}] HISTCONTROL`);
+        throw err;
+      } finally {
+        stop(launched);
+      }
+    },
+    40000,
+  );
 }
 
 test.skipIf(zshPath === null)('zsh: integration survives a noisy failing rc and records blocks', async () => {
