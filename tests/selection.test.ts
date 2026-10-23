@@ -25,6 +25,10 @@ test('selectionKey maps the scroll keys', () => {
   expect(selectionKey('\x1b[H')).toBe('scroll-top');
   expect(selectionKey('\x1b[F')).toBe('scroll-bottom');
   expect(selectionKey('\x1b[1~')).toBe('scroll-top');
+  expect(selectionKey('\x1bOH')).toBe('scroll-top');
+  expect(selectionKey('\x1bOF')).toBe('scroll-bottom');
+  expect(selectionKey('constructor')).toBeNull();
+  expect(selectionKey('__proto__')).toBeNull();
   expect(selectionKey('\x1b[4~')).toBe('scroll-bottom');
 });
 

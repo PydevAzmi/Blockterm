@@ -27,10 +27,13 @@ const KEYS: Record<string, Exclude<SelectionKey, null>> = {
   '\x1b[1~': 'scroll-top',
   '\x1b[F': 'scroll-bottom',
   '\x1b[4~': 'scroll-bottom',
+  // Application cursor mode (zsh's line editor turns it on) sends Home/End as SS3.
+  '\x1bOH': 'scroll-top',
+  '\x1bOF': 'scroll-bottom',
 };
 
 export function selectionKey(data: string): SelectionKey {
-  return KEYS[data] ?? null;
+  return Object.hasOwn(KEYS, data) ? KEYS[data]! : null;
 }
 
 export function moveSelection(
