@@ -8,6 +8,7 @@ import { runTask } from './agent/loop.js';
 import type { AgentEvent, Decision } from './agent/loop.js';
 import { createModel, keyHint, redact } from './agent/model.js';
 import type { ModelResult } from './agent/model.js';
+import { suggestCommand } from './agent/oneshot.js';
 import { buildSystemPrompt } from './agent/prompt.js';
 import type { ToolContext } from './agent/tools.js';
 import { BlockStore } from './blocks/store.js';
@@ -15,6 +16,8 @@ import { configPath, loadConfig as readConfigFile } from './config.js';
 import type { Config, LoadResult } from './config.js';
 import { initialUi, reduce } from './focus.js';
 import type { Action } from './focus.js';
+import { reduceHash } from './hash.js';
+import type { HashState } from './hash.js';
 import { ENTER_HOST, installRestore } from './host.js';
 import type { InputEvent } from './input/tokenize.js';
 import { InputTokenizer } from './input/tokenize.js';
@@ -82,6 +85,8 @@ export async function runApp(o: {
     let missingKeyEnv: string | null = null;
 
     let ui = initialUi();
+    let hash: HashState | null = null;
+    let hashController: AbortController | null = null;
     const transcript: Transcript[] = [];
     let card: CardView | null = null;
     let cardVisibleAt: number | null = null;
@@ -141,6 +146,13 @@ export async function runApp(o: {
       return '';
     };
 
+    const hashView = (): { text: string; cursor: boolean } | null => {
+      if (hash === null) return null;
+      if (hash.status === 'editing') return { text: `# ${hash.input}`, cursor: true };
+      if (hash.status === 'busy') return { text: `# ${hash.input}  …`, cursor: false };
+      return { text: `# ${hash.input}  ${hash.status.error}`, cursor: false };
+    };
+
     const render = (): void => {
       if (stopped || resizePending) return;
       ticker.sync(store.running !== null);
@@ -161,7 +173,7 @@ export async function runApp(o: {
           footer: FOOTER,
           footerStatus,
           view: session.view,
-          blocks: { store, scroll },
+          blocks: { store, scroll, hash: hashView() },
         },
         trackedModes.cursorVisible,
       );
@@ -299,6 +311,18 @@ export async function runApp(o: {
         return;
       }
 
+      if (
+        event.type === 'bytes' &&
+        event.data === '#' &&
+        session.view === 'blocks' &&
+        store.integrated &&
+        store.isIdlePrompt()
+      ) {
+        hash = { input: '', status: 'editing' };
+        requestRender();
+        return;
+      }
+
       const out = routeToPty(event, {
         modes: session.mirror.modes,
         tracked: tracked.get(),
@@ -382,41 +406,61 @@ export async function runApp(o: {
       requestRender();
     };
 
+    const ensureModel = ():
+      | { ok: true; model: LanguageModel }
+      | { ok: false; error: string; missingKeyEnv?: string } => {
+      if (config === null) return { ok: false, error: CONFIG_HINT };
+      let current = model;
+      if (current === null) {
+        if (sessionId === null) sessionId = randomUUID();
+        const result = factory(config, sessionId);
+        if (!result.ok) {
+          missingKeyEnv = result.missingKeyEnv;
+          return {
+            ok: false,
+            error: `Set ${result.missingKeyEnv}`,
+            missingKeyEnv: result.missingKeyEnv,
+          };
+        }
+        model = result.model;
+        modelLabel = result.label;
+        missingKeyEnv = null;
+        current = result.model;
+      }
+      return { ok: true, model: current };
+    };
+
     const submit = async (text: string): Promise<void> => {
-      if (config === null) {
-        if (!configNoticeShown) {
-          configNoticeShown = true;
-          transcript.push({ who: 'note', text: CONFIG_HINT });
+      const ensured = ensureModel();
+      if (!ensured.ok) {
+        if (config === null) {
+          if (!configNoticeShown) {
+            configNoticeShown = true;
+            transcript.push({ who: 'note', text: CONFIG_HINT });
+          }
+        } else {
+          transcript.push({ who: 'error', text: ensured.error });
+          if (ensured.missingKeyEnv !== undefined) {
+            for (const line of keyHint(process.platform, ensured.missingKeyEnv)) {
+              transcript.push({ who: 'note', text: line });
+            }
+          }
         }
         ui = { ...ui, mode: 'idle' };
         requestRender();
         return;
       }
 
-      if (model === null) {
-        if (sessionId === null) sessionId = randomUUID();
-        const result = factory(config, sessionId);
-        if (!result.ok) {
-          missingKeyEnv = result.missingKeyEnv;
-          transcript.push({ who: 'error', text: `Set ${result.missingKeyEnv}` });
-          for (const line of keyHint(process.platform, result.missingKeyEnv)) {
-            transcript.push({ who: 'note', text: line });
-          }
-          ui = { ...ui, mode: 'idle' };
-          requestRender();
-          return;
-        }
-        model = result.model;
-        modelLabel = result.label;
-        missingKeyEnv = null;
-      }
-
+      const activeModel = ensured.model;
       transcript.push({ who: 'you', text });
       agentOpen = false;
 
       const controller = new AbortController();
       taskController = controller;
-      const key = config.apiKeyEnv === '' ? '' : (process.env[config.apiKeyEnv] ?? '');
+      const key =
+        config === null || config.apiKeyEnv === ''
+          ? ''
+          : (process.env[config.apiKeyEnv] ?? '');
       const ctx: ToolContext = {
         session,
         appCursor: () => session.mirror.modes.applicationCursorKeysMode,
@@ -428,7 +472,7 @@ export async function runApp(o: {
 
       try {
         history = await runTask({
-          model,
+          model: activeModel,
           system: buildSystemPrompt({
             os: process.platform,
             shell: shell.file,
@@ -477,6 +521,68 @@ export async function runApp(o: {
           ui = { ...ui, mode: 'idle', card: null };
           requestRender();
         }
+      }
+    };
+
+    const submitHash = async (request: string): Promise<void> => {
+      if (hash === null) return;
+      const controller = new AbortController();
+      hashController?.abort();
+      hashController = controller;
+      const key =
+        config === null || config.apiKeyEnv === ''
+          ? ''
+          : (process.env[config.apiKeyEnv] ?? '');
+
+      try {
+        const ensured = ensureModel();
+        if (!ensured.ok) {
+          if (!controller.signal.aborted && hash !== null) {
+            hash = { ...hash, status: { error: ensured.error } };
+            requestRender();
+          }
+          return;
+        }
+
+        const text = await suggestCommand({
+          model: ensured.model,
+          ctx: { os: process.platform, shell: shell.file, folder: store.cwd },
+          request,
+          signal: controller.signal,
+        });
+
+        if (controller.signal.aborted || hash === null) return;
+        if (!store.isIdlePrompt()) {
+          hash = { ...hash, status: { error: 'prompt changed — suggestion not typed' } };
+          requestRender();
+          return;
+        }
+        if (text === '') {
+          hash = { ...hash, status: { error: 'no command suggested' } };
+          requestRender();
+          return;
+        }
+
+        session.write(text);
+        scroll = 0;
+        newOutput = false;
+        hash = null;
+        hashController = null;
+        requestRender();
+      } catch (error) {
+        if (controller.signal.aborted || hash === null) return;
+        hash = {
+          ...hash,
+          status: {
+            error: redact(
+              error instanceof Error ? error.message : String(error),
+              key === '' ? [] : [key],
+            ),
+          },
+        };
+        requestRender();
+      } finally {
+        if (hashController === controller) hashController = null;
       }
     };
 
@@ -558,6 +664,22 @@ export async function runApp(o: {
       }
       lastKeyAt = now;
       if (
+        hash !== null &&
+        ui.focus === 'terminal' &&
+        (event.type === 'bytes' || event.type === 'paste' || event.type === 'page-key')
+      ) {
+        const result = reduceHash(hash, event);
+        hash = result.state;
+        if (result.action?.type === 'submit') void submitHash(result.action.request);
+        else if (result.action?.type === 'close') {
+          hashController?.abort();
+          hashController = null;
+          hash = null;
+        }
+        requestRender();
+        return;
+      }
+      if (
         ui.card !== null &&
         (ui.card.editing || ui.card.denying) &&
         (event.type === 'paste' || (event.type === 'bytes' && !event.data.startsWith('\x1b')))
@@ -613,6 +735,8 @@ export async function runApp(o: {
 
     cleanup = (): void => {
       stopped = true;
+      hashController?.abort();
+      hashController = null;
       scheduler.dispose();
       ticker.dispose();
       if (inputTimer !== null) clearTimeout(inputTimer);

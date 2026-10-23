@@ -7,6 +7,7 @@ import { cellFrom, type Cell } from './frame.js';
 export interface BlocksView {
   store: BlockStore;
   scroll: number;
+  hash?: { text: string; cursor: boolean } | null;
 }
 
 export interface BlocksResult {
@@ -295,21 +296,39 @@ export function composeBlocks(
     docHeight += 1;
   }
 
+  const hash = view.hash ?? null;
   const liveStart = running?.startRow ?? view.store.promptRow;
   let liveFrom = 0;
   let liveBase = docHeight;
   let liveCount = 0;
   let cursorDoc: { row: number; col: number } | null = null;
+  let hashRow: Cell[] | null = null;
+  let hashDocRow = -1;
   if (liveStart !== null) {
     const cursorRow = buffer.baseY + buffer.cursorY;
     liveFrom = Math.max(0, Math.min(liveStart, cursorRow));
     liveCount = cursorRow - liveFrom + 1;
     liveBase = docHeight;
     docHeight += liveCount;
-    cursorDoc = {
-      row: docHeight - 1,
-      col: Math.min(1 + buffer.cursorX, Math.max(0, cols - 2)),
-    };
+    hashDocRow = docHeight - 1;
+    if (hash !== null) {
+      const text = truncateText(hash.text, inner);
+      const row: Cell[] = [];
+      pushText(row, text);
+      while (row.length < inner) row.push(blank());
+      hashRow = bordered(row, cols);
+      cursorDoc = hash.cursor
+        ? {
+            row: hashDocRow,
+            col: Math.min(1 + textWidth(text), Math.max(0, cols - 2)),
+          }
+        : null;
+    } else {
+      cursorDoc = {
+        row: hashDocRow,
+        col: Math.min(1 + buffer.cursorX, Math.max(0, cols - 2)),
+      };
+    }
   }
 
   const maxScroll = Math.max(0, docHeight - area.rows);
@@ -332,7 +351,11 @@ export function composeBlocks(
   }
   if (liveHeader !== null) take(headerAt, headerAt + 1, () => liveHeader!);
   if (liveStart !== null) {
-    take(liveBase, liveBase + liveCount, offset => liveRow(mirror, liveFrom + offset, inner));
+    take(liveBase, liveBase + liveCount, offset =>
+      hashRow !== null && liveBase + offset === hashDocRow
+        ? hashRow
+        : liveRow(mirror, liveFrom + offset, inner),
+    );
   }
 
   const cursor =

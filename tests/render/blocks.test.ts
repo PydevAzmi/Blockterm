@@ -95,6 +95,35 @@ test('finished block: border, status, duration, body and live prompt', async () 
   expect(result.cursor).toEqual({ row: 4, col: 3 });
 });
 
+test('hash input replaces the bottom live row and puts the cursor at its end', async () => {
+  const { mirror, store } = await finishedBlock({
+    command: 'ls',
+    body: 'a\r\nb',
+    after: '\x1b]133;A\x07$ ',
+  });
+  const result = composeBlocks(
+    mirror,
+    { store, scroll: 0, hash: { text: '# list big files', cursor: true } },
+    { cols: 40, rows: 12 },
+    5000,
+  );
+
+  const prompt = result.rows[4]!;
+  expect(prompt[0]!.ch).toBe('│');
+  expect(prompt[39]!.ch).toBe('│');
+  expect(rowText(prompt)).toContain('# list big files');
+  expect(rowText(prompt)).not.toContain('$');
+  expect(result.cursor).toEqual({ row: 4, col: 17 });
+
+  const noCursor = composeBlocks(
+    mirror,
+    { store, scroll: 0, hash: { text: '# list big files', cursor: false } },
+    { cols: 40, rows: 12 },
+    5000,
+  );
+  expect(noCursor.cursor).toBeNull();
+});
+
 test('failed block: exit code in the fail colour', async () => {
   const { mirror, store } = await finishedBlock({ command: 'false', exitCode: 1, body: 'oops' });
   const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
