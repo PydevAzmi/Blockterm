@@ -20,6 +20,17 @@ function systemPrompt(intro: string, ctx: OneShotContext): string {
   return `${intro}\nOS: ${ctx.os}\nShell: ${ctx.shell}\nFolder: ${ctx.folder ?? 'unknown'}`;
 }
 
+// Providers may ignore abortSignal, so the abort itself must settle the call.
+function untilAborted<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'));
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = (): void => reject(signal.reason ?? new Error('aborted'));
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  return Promise.race([work, aborted]).finally(() => signal.removeEventListener('abort', onAbort!));
+}
+
 export function cleanSuggestion(text: string): string {
   const candidate = text
     .split(/\r\n|\r|\n/)
@@ -42,12 +53,15 @@ export async function suggestCommand(o: {
   request: string;
   signal: AbortSignal;
 }): Promise<string> {
-  const result = await generateText({
-    model: o.model,
-    system: systemPrompt(SUGGEST_SYSTEM, o.ctx),
-    prompt: o.request,
-    abortSignal: o.signal,
-  });
+  const result = await untilAborted(
+    o.signal,
+    generateText({
+      model: o.model,
+      system: systemPrompt(SUGGEST_SYSTEM, o.ctx),
+      prompt: o.request,
+      abortSignal: o.signal,
+    }),
+  );
   return cleanSuggestion(result.text);
 }
 
@@ -66,11 +80,14 @@ export async function explainError(o: {
   block: Block;
   signal: AbortSignal;
 }): Promise<string> {
-  const result = await generateText({
-    model: o.model,
-    system: systemPrompt(EXPLAIN_SYSTEM, o.ctx),
-    prompt: explainRequest(o.block),
-    abortSignal: o.signal,
-  });
+  const result = await untilAborted(
+    o.signal,
+    generateText({
+      model: o.model,
+      system: systemPrompt(EXPLAIN_SYSTEM, o.ctx),
+      prompt: explainRequest(o.block),
+      abortSignal: o.signal,
+    }),
+  );
   return result.text.trim();
 }

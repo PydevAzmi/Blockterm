@@ -139,3 +139,30 @@ test('explainError rejects when the signal aborts during the call', async () => 
 
   await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
 });
+
+test('one-shot calls reject on abort even when the provider ignores the signal', async () => {
+  const late = (text: string) => () =>
+    new Promise<ReturnType<typeof reply>>(resolve => setTimeout(() => resolve(reply(text)), 50));
+
+  const explainCtl = new AbortController();
+  const explaining = explainError({
+    model: new MockLanguageModelV4({ doGenerate: late('late explanation') }),
+    ctx,
+    block: block([line('boom')]),
+    signal: explainCtl.signal,
+  });
+  const suggestCtl = new AbortController();
+  const suggesting = suggestCommand({
+    model: new MockLanguageModelV4({ doGenerate: late('rm -rf /tmp/x') }),
+    ctx,
+    request: 'clean up',
+    signal: suggestCtl.signal,
+  });
+  setTimeout(() => {
+    explainCtl.abort();
+    suggestCtl.abort();
+  }, 10);
+
+  await expect(explaining).rejects.toBeDefined();
+  await expect(suggesting).rejects.toBeDefined();
+});
