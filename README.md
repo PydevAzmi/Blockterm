@@ -1,5 +1,5 @@
 # Blockterm
-an open-source terminal named Blockterm. It wraps your real shell — ssh, vim, anything — and keeps it exactly as it is. Press `ctrl+k` to open an agent panel, describe what you want in plain words, and it types into your shell one approved keystroke at a time. Command blocks work today; `#` plain-English suggestions are coming.
+an open-source terminal named Blockterm. It wraps your real shell — ssh, vim, anything — and keeps it exactly as it is. Press `ctrl+k` to open an agent panel, describe what you want in plain words, and it types into your shell one approved keystroke at a time. Command blocks and `#` suggestions work today.
 
 Website: https://blockterm.mohamedazmi.dev
 
@@ -10,6 +10,12 @@ Each command's output becomes a block with its exit status and how long it took.
 Scroll with the mouse wheel or `shift+PgUp`/`shift+PgDn`. At an idle prompt, `ctrl+l` clears the blocks.
 
 Blocks work in bash (including Git Bash on Windows; macOS bash 3.2), zsh and PowerShell 7 (Windows and Linux; not macOS yet). Windows PowerShell 5.1 and WSL bash run without blocks for now. Set `BLOCKTERM_NO_INTEGRATION=1` to turn blocks off.
+
+## `#` suggestions
+
+At an empty prompt, type `#`, write what you want in plain words, and press `Enter`. The suggested command is typed into your prompt for you to edit; it never runs on its own.
+
+A failed command's block ends with `[Explain error]`. Click it to open the agent panel with an explanation of what went wrong (keyboard access comes with block selection).
 
 ## Build from source
 

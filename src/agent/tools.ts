@@ -13,7 +13,7 @@ export interface ToolContext {
 const DEFAULT_READ_LINES = 200;
 const MAX_READ_LINES = 500;
 
-function snapText(lines: SnapLine[]): string[] {
+export function snapText(lines: SnapLine[]): string[] {
   const out: string[] = [];
   let current = '';
   for (const line of lines) {

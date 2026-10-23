@@ -2,7 +2,7 @@ import type { IBufferCell, Terminal } from '@xterm/headless';
 
 import type { Layout } from '../layout.js';
 import type { View } from '../term/session.js';
-import { composeBlocks, type BlocksView } from './blocks.js';
+import { composeBlocks, type BlockAction, type BlocksView } from './blocks.js';
 
 export interface Cell {
   ch: string;
@@ -16,6 +16,7 @@ export interface Frame {
   cells: Cell[];
   cursor: { row: number; col: number; visible: boolean };
   blocksDocHeight?: number;
+  blockActions?: BlockAction[];
 }
 
 export interface Chrome {
@@ -125,6 +126,18 @@ export function composeFrame(
         )
       : null;
 
+  const blockActions: BlockAction[] = [];
+  if (blocks !== null) {
+    const left = layout.origin.col - 1;
+    for (const action of blocks.actions) {
+      blockActions.push({
+        ...action,
+        row: action.row + layout.origin.row,
+        col: left + action.col,
+      });
+    }
+  }
+
   for (let r = 1; r <= rows - 3; r += 1) {
     put(r, 0, '│', 1, '');
     if (rightBorder < cols) put(r, rightBorder, '│', 1, '');
@@ -177,5 +190,12 @@ export function composeFrame(
     }
   }
 
-  return { cols, rows, cells, cursor, blocksDocHeight: blocks?.docHeight };
+  return {
+    cols,
+    rows,
+    cells,
+    cursor,
+    blocksDocHeight: blocks?.docHeight,
+    blockActions: blocks !== null ? blockActions : undefined,
+  };
 }
