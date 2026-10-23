@@ -68,6 +68,17 @@ top and pwsh are not installed on this machine.
 - [ ] **`shift+PgUp` delivery** on Windows Terminal / iTerm2 / kitty / tmux (spec §5.3).
 - [ ] **Real feel: lag, tearing, cursor flicker** compared with the bare terminal.
 
+## Slice 2: blocks
+
+Owner checks for the blocks view. Run these by hand in a real terminal.
+
+- [ ] **starship and oh-my-posh prompts** look right and still produce blocks.
+- [ ] **Long output** (e.g. `seq 100000`) shows head/tail elision.
+- [ ] **Resizing** reflows blocks.
+- [ ] **`clear` and `ctrl+l`** clear the blocks.
+- [ ] **vim and less** still go full screen and return to blocks.
+- [ ] **Repeated command and leading-space command** (`HISTCONTROL=ignoreboth`) still finish blocks.
+
 ## Agent (slices 3–5)
 
 Owner checks for the agent panel, the approval card and the write tools. Run these with a real
