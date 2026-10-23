@@ -239,10 +239,30 @@ export function composeBlocks(
 
   let cursorDoc: { row: number; col: number } | null = null;
   const buffer = mirror.buffer.active;
-  const liveStart = view.store.running?.startRow ?? view.store.promptRow;
+  const running = view.store.running;
+  if (running !== null) {
+    doc.push(
+      topBorder(
+        {
+          id: 0,
+          command: running.command,
+          cwd: null,
+          exitCode: null,
+          startedAt: running.startedAt,
+          endedAt: null,
+          lines: [],
+          omitted: 0,
+        },
+        area.cols,
+        now,
+      ),
+    );
+  }
+  const liveStart = running?.startRow ?? view.store.promptRow;
   if (liveStart !== null) {
     const cursorRow = buffer.baseY + buffer.cursorY;
     const from = Math.max(0, Math.min(liveStart, cursorRow));
+    // ponytail: live rows are unbounded per frame; elide like finished blocks if long-running output gets slow.
     for (let row = from; row <= cursorRow; row += 1) doc.push(liveRow(mirror, row, inner));
     cursorDoc = {
       row: doc.length - 1,

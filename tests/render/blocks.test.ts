@@ -40,6 +40,7 @@ async function finishedBlock(o: {
   after?: string;
   cols?: number;
   rows?: number;
+  elapsed?: number;
 } = {}): Promise<{ mirror: Terminal; store: BlockStore }> {
   const mirror = makeMirror(o.cols ?? 40, o.rows ?? 12);
   let now = 1000;
@@ -50,7 +51,7 @@ async function finishedBlock(o: {
     mirror,
     `${o.before ?? ''}\x1b]133;A\x07$ \x1b]133;B\x07${command}\r\n\x1b]133;C\x07${body}\r\n`,
   );
-  now = 1810;
+  now = 1000 + (o.elapsed ?? 810);
   await write(mirror, `\x1b]133;D;${o.exitCode ?? 0}\x07${o.after ?? ''}`);
   return { mirror, store };
 }
@@ -177,6 +178,110 @@ test('scroll: five rows up from the bottom and the cursor scrolls away', async (
   expect(rowText(up.rows[0]!)).toContain('L08');
   expect(rowText(up.rows[9]!)).toContain('L17');
   expect(up.cursor).toBeNull();
+});
+
+test('running block: header above the live rows with elapsed time and no status glyph', async () => {
+  const mirror = makeMirror(40, 12);
+  let now = 1000;
+  const store = new BlockStore(mirror, () => now);
+  await write(mirror, '\x1b]133;A\x07$ \x1b]133;B\x07sleep 5\r\n\x1b]133;C\x07');
+  now = 3500;
+
+  const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, now);
+  expect(store.running).not.toBeNull();
+  expect(result.docHeight).toBe(2);
+
+  const header = result.rows[result.rows.length - 2]!;
+  expect(rowText(header).startsWith('┌ $ sleep 5')).toBe(true);
+  expect(rowText(header).endsWith('2.50s ┐')).toBe(true);
+  expect(rowText(header)).not.toContain('✔');
+  expect(rowText(header)).not.toContain('✘');
+});
+
+test('duration formatting: 12.3s and 1m05s', async () => {
+  const short = await finishedBlock({ elapsed: 12300 });
+  const shortResult = composeBlocks(
+    short.mirror,
+    { store: short.store, scroll: 0 },
+    { cols: 40, rows: 12 },
+    5000,
+  );
+  expect(rowText(shortResult.rows[0]!).endsWith('12.3s ┐')).toBe(true);
+
+  const long = await finishedBlock({ elapsed: 65000 });
+  const longResult = composeBlocks(
+    long.mirror,
+    { store: long.store, scroll: 0 },
+    { cols: 40, rows: 12 },
+    5000,
+  );
+  expect(rowText(longResult.rows[0]!).endsWith('1m05s ┐')).toBe(true);
+});
+
+test('block with a null exit code shows ✘ ?', async () => {
+  const mirror = makeMirror(40, 12);
+  const store = new BlockStore(mirror, () => 1000);
+  await write(mirror, '\x1b]133;B\x07sleep\r\n\x1b]133;C\x07partial\r\n\x1b]133;A\x07$ ');
+
+  const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 2000);
+  const top = result.rows[0]!;
+  expect(rowText(top)).toContain('✘ ?');
+});
+
+test('scroll larger than maxScroll clamps to the top', async () => {
+  const lines = Array.from({ length: 20 }, (_, i) => `L${String(i + 1).padStart(2, '0')}`).join('\r\n');
+  const { mirror, store } = await finishedBlock({ command: 'seq', body: lines, after: '\x1b]133;A\x07$ ' });
+
+  const result = composeBlocks(mirror, { store, scroll: 9999 }, { cols: 40, rows: 10 }, 5000);
+  expect(result.docHeight).toBe(23);
+  expect(rowText(result.rows[0]!)).toContain('┌');
+  expect(result.cursor).toBeNull();
+});
+
+test('idle with no live prompt row: cursor is null', async () => {
+  const { mirror, store } = await finishedBlock({ body: 'a' });
+  expect(store.promptRow).toBeNull();
+
+  const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 40, rows: 12 }, 5000);
+  expect(result.cursor).toBeNull();
+});
+
+test('wrapped line: a written space at the wrap point survives reflow', async () => {
+  const source = 'a'.repeat(39) + ' b';
+  const { mirror, store } = await finishedBlock({ command: 'wrap', body: source });
+
+  const result = composeBlocks(mirror, { store, scroll: 0 }, { cols: 20, rows: 12 }, 5000);
+  const joined = result.rows
+    .slice(1, -1)
+    .map(row => rowText(row).slice(1, 19).trimEnd())
+    .join('');
+  expect(joined).toContain('a b');
+});
+
+test('frame uses chrome.now for the running header', async () => {
+  const mirror = makeMirror(40, 12);
+  let now = 1000;
+  const store = new BlockStore(mirror, () => now);
+  await write(mirror, '\x1b]133;A\x07$ \x1b]133;B\x07sleep 5\r\n\x1b]133;C\x07');
+  now = 9999;
+
+  const layout = computeLayout({ cols: 40, rows: 12 });
+  const frame = composeFrame(
+    mirror,
+    layout,
+    {
+      title: 'blockterm',
+      footer: FOOTER,
+      view: 'blocks',
+      blocks: { store, scroll: 0 },
+      now: 3500,
+    },
+    true,
+  );
+
+  let header = '';
+  for (let col = 1; col <= 38; col += 1) header += frame.cells[1 * 40 + col]!.ch;
+  expect(header).toContain('2.50s');
 });
 
 test('frame uses the blocks renderer only when the store is integrated', async () => {

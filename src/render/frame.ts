@@ -23,6 +23,7 @@ export interface Chrome {
   view: View;
   footerStatus?: string;
   blocks?: BlocksView;
+  now?: number;
 }
 
 export const FOOTER = 'F1 help · ctrl+k agent · ctrl+l clear';
@@ -119,7 +120,7 @@ export function composeFrame(
           mirror,
           chrome.blocks,
           { cols: layout.pty.cols + 2, rows: layout.pty.rows },
-          Date.now(),
+          chrome.now ?? Date.now(),
         )
       : null;
 
