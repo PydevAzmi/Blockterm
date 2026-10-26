@@ -10,6 +10,11 @@ import type { PanelView, Transcript } from '../../src/render/panel.js';
 const FRAME_COLS = 40;
 const RECT = { row: 2, col: 0, rows: 10, cols: 40 };
 const INPUT_ROW = RECT.row + RECT.rows - 1;
+const lsParsed = parseKeys('ls <Enter>');
+const lsCard = {
+  target: 'pwsh',
+  tokens: lsParsed.ok ? displayTokens(lsParsed.tokens) : [],
+};
 
 function blank(): Cell[] {
   return Array.from({ length: FRAME_COLS * 12 }, () => ({ ch: ' ', width: 1 as const, sgr: '' }));
@@ -122,17 +127,71 @@ test('a status sits at the right end of the input line', () => {
   expect(cellAt(cs, INPUT_ROW, FRAME_COLS - 1).sgr).toBe('33');
 });
 
-test('the approval card is amber and shows key labels', () => {
+test('card rows carry the amber gutter and the full layout', () => {
+  const cs = blank();
+  drawPanel(cs, FRAME_COLS, RECT, ui(), [], lsCard);
+  const rows = [5, 6, 7, 8, 9, 10].map(r => rowText(cs, r).trimEnd());
+  expect(rows).toEqual([
+    '▌ wants to type into pwsh',
+    '▌',
+    '▌   ls·  ⏎ Enter',
+    '▌',
+    '▌  y  approve (Enter)   e edit  n deny',
+    '▌ a all',
+  ]);
+  for (const r of [5, 6, 7, 8, 9, 10]) expect(cellAt(cs, r, 0).sgr).toBe('38;5;178');
+  expect(cellAt(cs, 7, 4).sgr).toBe('97');
+  expect(cellAt(cs, 7, 6).sgr).toBe('2');
+  expect(cellAt(cs, 7, 9).sgr.endsWith(';7')).toBe(true);
+});
+
+test('blank rows drop first when space is tight', () => {
+  const cs = blank();
+  const small = { ...RECT, row: 7, rows: 5 };
+  const r = drawPanel(cs, FRAME_COLS, small, ui(), [], lsCard);
+  expect(r.cardTruncated).toBe(false);
+  expect(rowText(cs, 7).trimEnd()).toBe('▌ wants to type into pwsh');
+  expect(rowText(cs, 8).trimEnd()).toBe('▌   ls·  ⏎ Enter');
+});
+
+test('edit mode shows the edit hint instead of actions', () => {
+  const cs = blank();
+  const editUi = ui({ card: { keys: 'ls\r', target: 'pwsh', editing: true, denying: false } });
+  drawPanel(cs, FRAME_COLS, RECT, editUi, [], lsCard);
+  const text = [6, 7, 8, 9, 10].map(r => rowText(cs, r)).join('\n');
+  expect(text).toContain('Enter approve · Esc deny');
+  expect(text).not.toContain('a all');
+});
+
+test('a truncated card keeps the gutter on header and notice', () => {
+  const cs = blank();
+  const hugeParsed = parseKeys('x'.repeat(2000));
+  const huge = {
+    target: 'pwsh',
+    tokens: hugeParsed.ok ? displayTokens(hugeParsed.tokens) : [],
+  };
+  const r = drawPanel(cs, FRAME_COLS, RECT, ui(), [], huge);
+  expect(r.cardTruncated).toBe(true);
+  const rows = Array.from({ length: RECT.rows - 1 }, (_, i) => rowText(cs, RECT.row + i));
+  const header = rows.findIndex(t => t.startsWith('▌ wants to type into'));
+  expect(header).toBeGreaterThanOrEqual(0);
+  expect(rows.slice(header).every(t => t.startsWith('▌ '))).toBe(true);
+  expect(rows.slice(header).join(' ')).toContain('too long to show');
+});
+
+test('the approval card is amber and shows the new copy', () => {
   const cs = blank();
   const parsed = parseKeys('echo hi<Enter>');
   const tokens = parsed.ok ? displayTokens(parsed.tokens) : [];
   drawPanel(cs, FRAME_COLS, RECT, ui({ model: 'm' }), [], { target: 'shell', tokens });
   expect(cs.map(c => c.sgr).join(' ')).toContain('38;5;178');
   const text = Array.from({ length: RECT.rows }, (_, i) => rowText(cs, RECT.row + i)).join('\n');
-  expect(text).toContain('Type into shell');
+  expect(text).toContain('wants to type into shell');
   expect(text).toContain('⏎ Enter');
-  expect(text).toContain('y approve  e edit  n deny  a');
-  expect(text).toContain('task');
+  expect(text).toContain('y  approve (Enter)');
+  expect(text).toContain('e edit');
+  expect(text).toContain('n deny');
+  expect(text).toContain('a all');
 });
 
 test('a long card payload wraps across rows without dropping characters', () => {
@@ -143,8 +202,10 @@ test('a long card payload wraps across rows without dropping characters', () => 
   drawPanel(cs, FRAME_COLS, rect, ui({ model: 'm' }), [], { target: 'shell', tokens });
   const all = Array.from({ length: rect.rows }, (_, i) =>
     rowText(cs, rect.row + i).slice(rect.col, rect.col + rect.cols),
-  ).join('');
-  expect(all).toContain('git commit -am "a fairly long commit message here"');
+  ).join('\n');
+  expect(all.replace(/[▌\s]/g, '')).toContain(
+    'gitcommit-am"afairlylongcommitmessagehere"',
+  );
   expect(all).toContain('⏎ Enter');
 });
 
@@ -157,8 +218,9 @@ test('an oversized card is reported truncated and shows the edit/deny hint', () 
   expect(result.cardTruncated).toBe(true);
   const all = Array.from({ length: rect.rows }, (_, i) =>
     rowText(cs, rect.row + i).slice(rect.col, rect.col + rect.cols),
-  ).join('');
-  expect(all).toContain('too long to show — e to edit, n to deny, or widen the window');
+  ).join('\n');
+  const plain = all.replace(/▌/g, '').replace(/\s+/g, ' ');
+  expect(plain).toContain('too long to show — e to edit, n to deny, or widen the window');
 });
 
 test('transcript control characters are escaped, not written raw', () => {
@@ -222,4 +284,18 @@ test('returns no cursor when the terminal has focus', () => {
   const cs = blank();
   const result = drawPanel(cs, FRAME_COLS, RECT, ui({ focus: 'terminal' }), [], null);
   expect(result.cursor).toBeNull();
+});
+
+test('the cursor sits at ui.cursor, after a wide character', () => {
+  const cs = blank();
+  const r = drawPanel(cs, FRAME_COLS, RECT, ui({ input: '世ab', cursor: 1 }), [], null);
+  const promptWidth = '(agent) ❯ '.length;
+  expect(r.cursor).toEqual({ row: INPUT_ROW, col: promptWidth + 2 });
+});
+
+test('cursor at the start of a long wrapped input stays on a visible row', () => {
+  const cs = blank();
+  const r = drawPanel(cs, FRAME_COLS, RECT, ui({ input: 'x'.repeat(500), cursor: 0 }), [], null);
+  expect(r.cursor!.row).toBeGreaterThanOrEqual(RECT.row);
+  expect(r.cursor!.row).toBeLessThanOrEqual(INPUT_ROW);
 });

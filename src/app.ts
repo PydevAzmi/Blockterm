@@ -26,6 +26,14 @@ import { InputTokenizer } from './input/tokenize.js';
 import { routeToPty } from './input/route.js';
 import { computeLayout } from './layout.js';
 import type { Size } from './layout.js';
+import {
+  extendSelection,
+  highlight,
+  paneAt,
+  selectedText,
+  startSelection,
+} from './mouse-select.js';
+import type { MouseSelection } from './mouse-select.js';
 import { renderDiff } from './render/diff.js';
 import { FOOTER, composeFrame } from './render/frame.js';
 import type { Frame } from './render/frame.js';
@@ -46,7 +54,7 @@ import type { TerminalSession } from './term/session.js';
 
 const CONFIG_HINT = 'Run `blockterm setup` to choose a model';
 const APPROVAL_QUIET_MS = 400;
-const APPROVE_KEYS = new Set(['y', 'a', 'e']);
+const APPROVE_KEYS = new Set(['y', 'a', 'e', '\r']);
 const SELECTION_HINT = 'c copy · o output · r rerun · e explain · Esc back';
 
 export function cardTokens(keys: string): { kind: 'text' | 'key'; label: string }[] {
@@ -141,6 +149,8 @@ export async function runApp(o: {
     let newOutput = false;
     let lastDocHeight = 0;
     let selected: number | null = null;
+    let mouseSel: MouseSelection | null = null;
+    let dragging = false;
     let revealSelected = false;
     let selectionNotice: string | null = null;
     let selectionNoticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -175,10 +185,10 @@ export async function runApp(o: {
       const trackedModes = tracked.get();
       const status = statusText();
       const footerStatus =
-        status !== ''
-          ? status
-          : selectionNotice !== null
-            ? selectionNotice
+        selectionNotice !== null
+          ? selectionNotice
+          : status !== ''
+            ? status
             : selected !== null
               ? SELECTION_HINT
               : scroll > 0 && newOutput
@@ -288,17 +298,14 @@ export async function runApp(o: {
         }
         if (ui.inputShown !== false) ui = { ...ui, inputShown: false };
       }
+      if (mouseSel !== null && ui.help !== true) highlight(frame, mouseSel);
       if (ui.help === true) {
         drawHelp(frame.cells, frame.cols, frame.rows);
         frame.cursor = { ...frame.cursor, visible: false };
         cardVisibleAt = null;
         inputVisibleAt = null;
       }
-      const hostModes = hostModesFrom(
-        session.mirror,
-        trackedModes,
-        (session.view === 'blocks' && store.integrated) || layout.panel.rect !== null,
-      );
+      const hostModes = hostModesFrom(session.mirror, trackedModes);
       const out = hostModeDiff(lastHostModes, hostModes) + renderDiff(lastFrame, frame);
       if (out !== '') stdout.write(out);
       lastHostModes = hostModes;
@@ -420,6 +427,8 @@ export async function runApp(o: {
     };
 
     const applyLayout = (): void => {
+      mouseSel = null;
+      dragging = false;
       const next = computeLayout({ cols: stdout.columns, rows: stdout.rows }, ui.open);
       const sizeChanged = next.pty.cols !== layout.pty.cols || next.pty.rows !== layout.pty.rows;
       layout = next;
@@ -864,6 +873,21 @@ export async function runApp(o: {
         case 'cancel-task':
           abortTask();
           break;
+        case 'clear-chat':
+          if (taskController !== null) {
+            showSelectionNotice('Esc to cancel first', 2000);
+            requestRender();
+            break;
+          }
+          transcript.length = 0;
+          history = [];
+          sessionId = null;
+          model = null;
+          agentOpen = false;
+          agentScroll = 0;
+          transcript.push({ who: 'note', text: 'chat cleared' });
+          requestRender();
+          break;
         case 'decide':
           decideCard(action.decision);
           break;
@@ -885,14 +909,15 @@ export async function runApp(o: {
 
       const keys = [...event.data];
       if (!keys.some(ch => APPROVE_KEYS.has(ch))) return false;
-      const approve = keys.some(ch => ch === 'y' || ch === 'a');
+      const approve = keys.some(ch => ch === 'y' || ch === 'a' || ch === '\r');
       const seenAt = approve ? cardVisibleAt : cardDrawnAt;
       if (seenAt === null) return true;
       return now - seenAt < APPROVAL_QUIET_MS || quiet < APPROVAL_QUIET_MS;
     };
 
-    // The wheel scrolls whichever area it is over. Other reports we asked for only to get the
-    // wheel are dropped; a program that asked for the mouse itself gets them in the shell area.
+    // The wheel scrolls whichever area it is over; blockterm also asks for drag reports to select
+    // in its panes. Other reports are dropped; a program that asked for the mouse itself gets them
+    // in the shell area. With no tracking, a shell-area wheel emulates the host's alternate scroll.
     const wheelEvent = (event: Extract<InputEvent, { type: 'mouse' }>): boolean => {
       const wheel = event.button & ~(4 | 8 | 16);
       const step = wheel === 64 ? 3 : wheel === 65 ? -3 : 0;
@@ -905,7 +930,16 @@ export async function runApp(o: {
         return true;
       }
       if (session.mirror.modes.mouseTrackingMode !== 'none') return false;
-      if (step !== 0 && session.view === 'blocks' && store.integrated) scrollBy(step);
+      if (step !== 0) {
+        if (session.view === 'blocks' && store.integrated) {
+          scrollBy(step);
+        } else {
+          const app = session.mirror.modes.applicationCursorKeysMode;
+          const arrow =
+            step > 0 ? (app ? '\x1bOA' : '\x1b[A') : app ? '\x1bOB' : '\x1b[B';
+          session.write(arrow + arrow + arrow);
+        }
+      }
       return true;
     };
 
@@ -926,13 +960,67 @@ export async function runApp(o: {
       }
       if (event.type === 'help-key') {
         lastKeyAt = Date.now();
+        mouseSel = null;
+        dragging = false;
         const result = reduce(ui, event);
         ui = result.ui;
         for (const action of result.actions) runAction(action);
         requestRender();
         return;
       }
-      if (event.type === 'mouse' && wheelEvent(event)) return;
+      if (event.type === 'mouse') {
+        // The wheel scrolls, as before. Left drags belong to blockterm in the agent strip and,
+        // when the inner program did not ask for the mouse, in the shell.
+        if ((event.button & 64) === 0) {
+          const left = (event.button & 3) === 0;
+          const moving = (event.button & 32) !== 0;
+          const at = { row: event.row, col: event.col };
+          if (event.action === 'press' && left && !moving) {
+            const pane = paneAt(layout, event.row);
+            if (!(pane === 'shell' && session.mirror.modes.mouseTrackingMode !== 'none')) {
+              mouseSel = startSelection(layout, at);
+              dragging = mouseSel !== null;
+              requestRender();
+              return;
+            }
+            if (mouseSel !== null) {
+              mouseSel = null;
+              dragging = false;
+              requestRender();
+            }
+          } else if (event.action === 'motion' && left && dragging && mouseSel !== null) {
+            mouseSel = extendSelection(mouseSel, layout, at);
+            requestRender();
+            return;
+          } else if (event.action === 'release' && dragging && mouseSel !== null) {
+            const sel = extendSelection(mouseSel, layout, at);
+            mouseSel = sel;
+            dragging = false;
+            if (sel.moved && lastFrame !== null) {
+              const text = selectedText(lastFrame, sel);
+              if (text !== '') {
+                copy(text);
+                showSelectionNotice(`copied ${Array.from(text).length} chars`, 2000);
+              }
+            }
+            requestRender();
+            return;
+          }
+        }
+        if (wheelEvent(event)) return;
+      }
+      if (
+        mouseSel !== null &&
+        (event.type === 'bytes' ||
+          event.type === 'paste' ||
+          event.type === 'page-key' ||
+          event.type === 'agent-key')
+      ) {
+        mouseSel = null;
+        dragging = false;
+        requestRender();
+        if (event.type === 'bytes' && event.data === '\x1b') return;
+      }
       const now = Date.now();
       const quiet = now - lastKeyAt;
       if (blocksApprove(event, now, quiet)) {

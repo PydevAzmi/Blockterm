@@ -23,6 +23,9 @@ const truncatedCard = (): PanelUi => ({
   card: { keys: 'rm -rf\r', target: 'shell', editing: false, denying: false, truncated: true },
 });
 
+const keysIn = (ui: PanelUi, ...seq: string[]): PanelUi =>
+  seq.reduce((u, s) => reduce(u, bytes(s)).ui, ui);
+
 test('agent-key opens the panel and reports a layout change', () => {
   const r = reduce(initialUi(), { type: 'agent-key' });
   expect(r.ui.open).toBe(true);
@@ -78,6 +81,76 @@ test('a paste event inserts its text into the input', () => {
   expect(r.actions).toEqual([]);
 });
 
+test('left arrow then typing inserts before the end', () => {
+  const ui = keysIn(panel({ input: 'ac' }), '\x1b[D', 'b');
+  expect(ui.input).toBe('abc');
+  expect(ui.cursor).toBe(2);
+});
+
+test('application-cursor arrows and Home/End move the cursor', () => {
+  let ui = keysIn(panel({ input: 'abc' }), '\x1bOH');
+  expect(ui.cursor).toBe(0);
+  ui = keysIn(ui, '\x1bOC', '\x1b[F');
+  expect(ui.cursor).toBe(3);
+  expect(keysIn(panel({ input: 'abc' }), '\x1b[1~').cursor).toBe(0);
+  expect(keysIn(panel({ input: 'abc', cursor: 0 }), '\x1b[4~').cursor).toBe(3);
+});
+
+test('backspace deletes before the cursor, by code point', () => {
+  const ui = keysIn(panel({ input: 'a世b', cursor: 2 }), '\x7f');
+  expect(ui.input).toBe('ab');
+  expect(ui.cursor).toBe(1);
+});
+
+test('paste inserts at the cursor', () => {
+  const ui = reduce(panel({ input: 'ad', cursor: 1 }), { type: 'paste', text: 'bc' }).ui;
+  expect(ui.input).toBe('abcd');
+  expect(ui.cursor).toBe(3);
+});
+
+test('up and down walk submitted prompts and restore the draft', () => {
+  let ui = keysIn(panel(), 'one\r');
+  ui = { ...ui, mode: 'idle' };
+  ui = keysIn(ui, 'two\r');
+  ui = { ...ui, mode: 'idle' };
+  ui = keysIn(ui, 'dra', '\x1b[A');
+  expect(ui.input).toBe('two');
+  ui = keysIn(ui, '\x1b[A', '\x1b[A');
+  expect(ui.input).toBe('one');
+  ui = keysIn(ui, '\x1b[B', '\x1b[B');
+  expect(ui.input).toBe('dra');
+  expect(ui.historyAt).toBeUndefined();
+});
+
+test('/clear emits clear-chat instead of submitting', () => {
+  const r = reduce(panel({ input: ' /clear ' }), bytes('\r'));
+  expect(r.actions).toEqual([{ type: 'clear-chat' }]);
+  expect(r.ui.input).toBe('');
+  expect(r.ui.mode).toBe('idle');
+});
+
+test('ctrl+l in the panel emits clear-chat, also when busy', () => {
+  expect(reduce(panel(), bytes('\x0c')).actions).toEqual([{ type: 'clear-chat' }]);
+  expect(reduce(panel({ mode: 'busy' }), bytes('\x0c')).actions).toEqual([{ type: 'clear-chat' }]);
+});
+
+test('the same prompt twice in a row is stored once', () => {
+  let ui = keysIn(panel(), 'ls\r');
+  ui = keysIn({ ...ui, mode: 'idle' }, 'ls\r');
+  expect(ui.history).toEqual(['ls']);
+});
+
+test('up during card edit does not recall history', () => {
+  const editing = keysIn({ ...withCard(), history: ['old'] }, 'e');
+  const ui = keysIn(editing, '\x1b[A');
+  expect(ui.input).toBe('rm -rf\r');
+});
+
+test('left arrow works in the card edit input', () => {
+  const ui = keysIn(withCard(), 'e', '\x1b[D', 'X');
+  expect(ui.input.endsWith('X\r')).toBe(true);
+});
+
 test('escape on an idle panel closes it and returns focus to the terminal', () => {
   const r = reduce(panel(), bytes('\x1b'));
   expect(r.ui.focus).toBe('terminal');
@@ -112,6 +185,16 @@ test('y approves with allowRest false and clears the card', () => {
     { type: 'decide', decision: { kind: 'approve', keys: 'rm -rf\r', allowRest: false } },
   ]);
   expect(r.ui.card).toBeNull();
+});
+
+test('Enter approves an idle card', () => {
+  expect(reduce(withCard(), bytes('\r')).actions).toEqual([
+    { type: 'decide', decision: { kind: 'approve', keys: 'rm -rf\r', allowRest: false } },
+  ]);
+});
+
+test('Enter does nothing on a truncated card', () => {
+  expect(reduce(truncatedCard(), bytes('\r')).actions).toEqual([]);
 });
 
 test('a approves and allows the rest of the task', () => {

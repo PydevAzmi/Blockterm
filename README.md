@@ -15,7 +15,7 @@ The last line is the mode line: your shell in parentheses, then the folder, git 
 
 Scroll with the mouse wheel or `shift+PgUp`/`shift+PgDn`. The wheel scrolls whatever is under the pointer: the blocks, or the agent's replies when the agent line is open. At an idle prompt, `ctrl+l` clears the blocks.
 
-To select text, hold `Shift` while dragging (`Option` in iTerm2) and copy the way your terminal normally does (right-click, `ctrl+shift+c`, or copy-on-select). Blockterm asks the terminal for wheel events, which is why a plain drag no longer selects. Programs that ask for the mouse themselves, like vim with `mouse=a` or htop, still get it.
+Drag in the shell or the agent strip to select text from that pane; releasing copies it and the mode line shows `copied N chars`. You can also hold `Shift` while dragging (`Option` in iTerm2) to use your terminal's native selection. Programs that ask for the mouse themselves, like vim with `mouse=a` or htop, still get it in the shell area.
 
 Blocks work in bash (including Git Bash on Windows; macOS bash 3.2), zsh, PowerShell 7 (Windows and Linux; not macOS yet) and Windows PowerShell 5.1 (no profile changes and no execution-policy change; the integration script runs as-is). WSL bash runs without blocks for now. Set `BLOCKTERM_NO_INTEGRATION=1` to turn blocks off.
 
@@ -134,7 +134,7 @@ The agent reads whatever is on your screen — a remote shell, a vim buffer — 
    blockterm doctor
    ```
 
-4. Ask. Press `ctrl+k` anywhere — even inside ssh or vim — and write in plain words. When the agent wants to type something into your shell, approve it with `y`, edit it with `e`, deny it with `n`, or allow the rest of the task with `a`. It never sends a keystroke you have not approved.
+4. Ask. Press `ctrl+k` anywhere — even inside ssh or vim — and write in plain words. When the agent wants to type something into your shell, approve it with `y` or `Enter`, edit it with `e`, deny it with `n`, or allow the rest of the task with `a`. It never sends a keystroke you have not approved.
 
 The agent can also run a command at an idle prompt (`run_command`), list recent blocks (`list_blocks`) and read one block's output (`read_block`). `run_command` waits for the same approval as typed keys.
 
@@ -178,7 +178,7 @@ The agent can also run a command at an idle prompt (`run_command`), list recent 
 
 ### Agent line
 
-`ctrl+k` turns the mode line into the agent's input, labelled with the mode in parentheses: `(agent · your-model) ❯`. A few rows above it show the conversation (scroll it with the wheel); the agent's replies are short and drawn in `agentColor`. `ctrl+k` again returns focus to the shell; `Esc` closes the line (or cancels a running task).
+`ctrl+k` turns the mode line into the agent's input, labelled with the mode in parentheses: `(agent · your-model) ❯`. A few rows above it show the conversation (scroll it with the wheel); the agent's replies are short and drawn in `agentColor`. `ctrl+k` again returns focus to the shell; `Esc` closes the line (or cancels a running task). Type `/clear` or press `ctrl+l` in the agent line to start a fresh chat without restarting blockterm.
 
 ### Privacy
 

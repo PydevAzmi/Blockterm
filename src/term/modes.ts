@@ -82,14 +82,14 @@ export function trackModes(
 }
 
 // ponytail: RIS/DECSTR resets not tracked
-// With wantWheel, blockterm asks for mouse reports to scroll the blocks and the agent strip;
-// host terminals still select natively with Shift+drag (Option+drag in iTerm2).
-export function hostModesFrom(mirror: Terminal, t: TrackedModes, wantWheel = false): HostModes {
+// Always ask for drag so blockterm can select in its panes; host terminals still select natively
+// with Shift+drag (Option+drag in iTerm2). An inner program that asked for `any` keeps it.
+export function hostModesFrom(mirror: Terminal, t: TrackedModes): HostModes {
   const inner = mirror.modes.mouseTrackingMode;
   return {
     appCursor: mirror.modes.applicationCursorKeysMode,
     appKeypad: mirror.modes.applicationKeypadMode,
-    mouse: wantWheel && inner === 'none' ? 'vt200' : inner,
+    mouse: inner === 'any' ? 'any' : 'drag',
     cursorStyle: t.cursorStyle,
   };
 }

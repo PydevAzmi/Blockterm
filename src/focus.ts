@@ -5,6 +5,10 @@ export interface PanelUi {
   open: boolean;
   focus: 'terminal' | 'panel';
   input: string;
+  cursor?: number;
+  history?: string[];
+  historyAt?: number;
+  draft?: string;
   inputTruncated?: boolean;
   inputShown?: boolean;
   help?: boolean;
@@ -23,6 +27,7 @@ export type Action =
   | { type: 'submit'; text: string }
   | { type: 'cancel-task' }
   | { type: 'decide'; decision: Decision }
+  | { type: 'clear-chat' }
   | { type: 'layout-changed' };
 
 const ESC = '\x1b';
@@ -37,14 +42,99 @@ function isPrintable(ch: string): boolean {
   return ch >= ' ' && ch !== DEL;
 }
 
-function deleteLast(text: string): string {
-  const points = Array.from(text);
-  points.pop();
-  return points.join('');
+type CursorKey = 'left' | 'right' | 'home' | 'end' | 'up' | 'down';
+
+const CURSOR_KEYS: Record<string, CursorKey> = {
+  '\x1b[D': 'left',
+  '\x1bOD': 'left',
+  '\x1b[C': 'right',
+  '\x1bOC': 'right',
+  '\x1b[H': 'home',
+  '\x1bOH': 'home',
+  '\x1b[1~': 'home',
+  '\x1b[F': 'end',
+  '\x1bOF': 'end',
+  '\x1b[4~': 'end',
+  '\x1b[A': 'up',
+  '\x1bOA': 'up',
+  '\x1b[B': 'down',
+  '\x1bOB': 'down',
+};
+
+function cursorAt(ui: PanelUi, points: string[]): number {
+  const cursor = ui.cursor ?? points.length;
+  return Math.max(0, Math.min(cursor, points.length));
+}
+
+function withInput(ui: PanelUi, input: string, cursor?: number): PanelUi {
+  return { ...ui, input, cursor };
+}
+
+function insertInput(ui: PanelUi, text: string, stripLineBreaks = false): PanelUi {
+  const points = Array.from(ui.input);
+  const at = cursorAt(ui, points);
+  const inserted = Array.from(stripLineBreaks ? text.replace(/[\r\n]/g, '') : text);
+  return withInput(
+    ui,
+    [...points.slice(0, at), ...inserted, ...points.slice(at)].join(''),
+    at + inserted.length,
+  );
+}
+
+function deleteBefore(ui: PanelUi): PanelUi {
+  const points = Array.from(ui.input);
+  const at = cursorAt(ui, points);
+  if (at === 0) return { ...ui, cursor: 0 };
+  points.splice(at - 1, 1);
+  return withInput(ui, points.join(''), at - 1);
+}
+
+function moveCursor(ui: PanelUi, key: CursorKey): PanelUi {
+  const points = Array.from(ui.input);
+  const at = cursorAt(ui, points);
+  const cursor =
+    key === 'left'
+      ? Math.max(0, at - 1)
+      : key === 'right'
+        ? Math.min(points.length, at + 1)
+        : key === 'home'
+          ? 0
+          : points.length;
+  return { ...ui, cursor };
+}
+
+function historyUp(ui: PanelUi): { ui: PanelUi; actions: Action[] } {
+  const history = ui.history ?? [];
+  if (history.length === 0) return { ui, actions: [] };
+  if (ui.historyAt === undefined) {
+    const at = history.length - 1;
+    return {
+      ui: { ...withInput(ui, history[at]!), historyAt: at, draft: ui.input },
+      actions: [],
+    };
+  }
+  const at = Math.min(Math.max(0, ui.historyAt - 1), history.length - 1);
+  return { ui: { ...withInput(ui, history[at]!), historyAt: at }, actions: [] };
+}
+
+function historyDown(ui: PanelUi): { ui: PanelUi; actions: Action[] } {
+  const history = ui.history ?? [];
+  if (ui.historyAt === undefined || history.length === 0) return { ui, actions: [] };
+  const at = Math.min(Math.max(0, ui.historyAt), history.length - 1);
+  if (at < history.length - 1) {
+    return { ui: { ...withInput(ui, history[at + 1]!), historyAt: at + 1 }, actions: [] };
+  }
+  return {
+    ui: { ...withInput(ui, ui.draft ?? ''), historyAt: undefined, draft: undefined },
+    actions: [],
+  };
 }
 
 function decide(ui: PanelUi, decision: Decision): { ui: PanelUi; actions: Action[] } {
-  return { ui: { ...ui, input: '', card: null }, actions: [{ type: 'decide', decision }] };
+  return {
+    ui: { ...withInput(ui, ''), card: null },
+    actions: [{ type: 'decide', decision }],
+  };
 }
 
 function toggle(ui: PanelUi): { ui: PanelUi; actions: Action[] } {
@@ -55,16 +145,43 @@ function toggle(ui: PanelUi): { ui: PanelUi; actions: Action[] } {
 
 function submit(ui: PanelUi): { ui: PanelUi; actions: Action[] } {
   if (ui.mode === 'busy' || ui.input.trim() === '') return { ui, actions: [] };
-  return { ui: { ...ui, input: '', mode: 'busy' }, actions: [{ type: 'submit', text: ui.input }] };
+  const history = ui.history ?? [];
+  const nextHistory =
+    history.length > 0 && history[history.length - 1] === ui.input
+      ? history
+      : [...history, ui.input];
+  return {
+    ui: {
+      ...withInput(ui, ''),
+      mode: 'busy',
+      history: nextHistory,
+      historyAt: undefined,
+      draft: undefined,
+    },
+    actions: [{ type: 'submit', text: ui.input }],
+  };
 }
 
 function plainBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] } {
   if (data === ESC) {
     if (ui.mode === 'busy') return { ui, actions: [{ type: 'cancel-task' }] };
     return {
-      ui: { ...ui, open: false, focus: 'terminal', input: '' },
+      ui: {
+        ...withInput(ui, ''),
+        open: false,
+        focus: 'terminal',
+        historyAt: undefined,
+        draft: undefined,
+      },
       actions: [{ type: 'layout-changed' }],
     };
+  }
+  if (data === '\x0c') return { ui, actions: [{ type: 'clear-chat' }] };
+  const key = CURSOR_KEYS[data];
+  if (key !== undefined) {
+    if (key === 'up') return historyUp(ui);
+    if (key === 'down') return historyDown(ui);
+    return { ui: moveCursor(ui, key), actions: [] };
   }
   if (data.startsWith(ESC)) return { ui, actions: [] };
 
@@ -72,13 +189,18 @@ function plainBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[]
   const actions: Action[] = [];
   for (const ch of Array.from(data)) {
     if (ch === DEL || ch === BS) {
-      next = { ...next, input: deleteLast(next.input) };
+      next = deleteBefore(next);
     } else if (ch === '\r') {
-      const result = submit(next);
-      next = result.ui;
-      actions.push(...result.actions);
+      if (next.input.trim() === '/clear') {
+        next = { ...next, input: '', cursor: undefined };
+        actions.push({ type: 'clear-chat' });
+      } else {
+        const result = submit(next);
+        next = result.ui;
+        actions.push(...result.actions);
+      }
     } else if (isPrintable(ch)) {
-      next = { ...next, input: next.input + ch };
+      next = insertInput(next, ch);
     }
   }
   return { ui: next, actions };
@@ -86,6 +208,14 @@ function plainBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[]
 
 function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] } {
   if (data === ESC) return decide(ui, { kind: 'deny', reason: '' });
+  const key = CURSOR_KEYS[data];
+  if (key !== undefined) {
+    const card = ui.card;
+    if (card !== null && (card.editing || card.denying) && key !== 'up' && key !== 'down') {
+      return { ui: moveCursor(ui, key), actions: [] };
+    }
+    return { ui, actions: [] };
+  }
   if (data.startsWith(ESC)) return { ui, actions: [] };
 
   let next = ui;
@@ -95,7 +225,7 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
 
     if (card.editing || card.denying) {
       if (ch === DEL || ch === BS) {
-        next = { ...next, input: deleteLast(next.input), inputShown: false };
+        next = { ...deleteBefore(next), inputShown: false };
       } else if (ch === '\r') {
         if (next.inputTruncated !== false) continue;
         if (card.editing && next.inputShown !== true) continue;
@@ -104,24 +234,22 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
           : { kind: 'deny', reason: next.input };
         return decide(next, decision);
       } else if (isPrintable(ch)) {
-        next = { ...next, input: next.input + ch, inputShown: false };
+        next = { ...insertInput(next, ch), inputShown: false };
       }
-    } else if (ch === 'y' && card.truncated !== true) {
+    } else if ((ch === 'y' || ch === '\r') && card.truncated !== true) {
       return decide(next, { kind: 'approve', keys: card.keys, allowRest: false });
     } else if (ch === 'a' && card.truncated !== true) {
       return decide(next, { kind: 'approve', keys: card.keys, allowRest: true });
     } else if (ch === 'n') {
       next = {
-        ...next,
-        input: '',
+        ...withInput(next, ''),
         inputTruncated: true,
         inputShown: false,
         card: { ...card, denying: true },
       };
     } else if (ch === 'e') {
       next = {
-        ...next,
-        input: card.keys,
+        ...withInput(next, card.keys),
         inputTruncated: true,
         inputShown: false,
         card: { ...card, editing: true },
@@ -133,13 +261,10 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
 
 function panelPaste(ui: PanelUi, text: string): { ui: PanelUi; actions: Action[] } {
   if (ui.card !== null && (ui.card.editing || ui.card.denying)) {
-    return {
-      ui: { ...ui, input: ui.input + text.replace(/[\r\n]/g, ''), inputShown: false },
-      actions: [],
-    };
+    return { ui: { ...insertInput(ui, text, true), inputShown: false }, actions: [] };
   }
   if (ui.card === null) {
-    return { ui: { ...ui, input: ui.input + text }, actions: [] };
+    return { ui: insertInput(ui, text), actions: [] };
   }
   return { ui, actions: [] };
 }
