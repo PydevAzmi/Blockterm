@@ -52,7 +52,7 @@ jobs:
           npm i -g --allow-scripts=node-pty "$GITHUB_WORKSPACE/$tarball"
           installed_version=$(blockterm --version)
           echo "blockterm --version: $installed_version"
-          test "$installed_version" = "0.1.0"
+          test "$installed_version" = "$(node -p "require(process.env.GITHUB_WORKSPACE + '/package.json').version")"
           blockterm --help | head -n 1 | grep -q '^usage: blockterm'
           package_root="$(npm root -g)/blockterm"
           echo "Installed at $package_root"
