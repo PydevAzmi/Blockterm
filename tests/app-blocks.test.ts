@@ -299,6 +299,52 @@ test('the wheel scrolls the blocks and never reaches the pty', async () => {
   await expect(run).resolves.toBe(0);
 });
 
+test('the wheel in fullscreen without mouse tracking sends arrows to the pty', async () => {
+  const { run, pty, stdin } = startApp();
+
+  pty.emit('\x1b[?1049h');
+  await wait(30);
+
+  stdin.emit('data', '\x1b[<64;5;5M');
+  await until(() => pty.written.length > 0);
+  expect(pty.written.map(String).join('')).toBe('\x1b[A\x1b[A\x1b[A');
+
+  stdin.emit('data', '\x1b[<65;5;5M');
+  await until(() => pty.written.map(String).join('').endsWith('\x1b[B\x1b[B\x1b[B'));
+  expect(pty.written.map(String).join('')).toBe('\x1b[A\x1b[A\x1b[A\x1b[B\x1b[B\x1b[B');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('the wheel in fullscreen uses application cursor arrows when enabled', async () => {
+  const { run, pty, stdin } = startApp();
+
+  pty.emit('\x1b[?1049h\x1b[?1h');
+  await wait(30);
+
+  stdin.emit('data', '\x1b[<64;5;5M');
+  await until(() => pty.written.length > 0);
+  expect(pty.written.map(String).join('')).toBe('\x1bOA\x1bOA\x1bOA');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('the wheel in a raw shell view sends arrows to the pty', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit('hello');
+  await until(() => output(stdout).includes('hello'));
+
+  stdin.emit('data', '\x1b[<64;5;5M');
+  await until(() => pty.written.length > 0);
+  expect(pty.written.map(String).join('')).toBe('\x1b[A\x1b[A\x1b[A');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
 test('the wheel over the agent strip scrolls the transcript, not the blocks', async () => {
   const model = new MockLanguageModelV4({
     doGenerate: async () => reply(Array.from({ length: 12 }, (_, i) => `R${String(i).padStart(2, '0')}`).join('\n')),
@@ -1032,6 +1078,38 @@ test('a drag reaches the pty when the program asked for the mouse, and the agent
   stdin.emit('data', '\x1b[<0;10;24m');
   await until(() => copied.length === 1);
   expect(copied[0]).toContain('(agent');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('a shell press after a copy does not turn its release into a second copy', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
+
+  pty.emit('hello');
+  await until(() => output(stdout).includes('hello'));
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', '\x0b');
+  await wait(20);
+  stdin.emit('data', '\x1b[<0;1;24M');
+  stdin.emit('data', '\x1b[<32;10;24M');
+  stdin.emit('data', '\x1b[<0;10;24m');
+  await until(() => copied.length === 1);
+
+  pty.emit('\x1b[?1000h\x1b[?1006h');
+  await wait(30);
+
+  stdin.emit('data', '\x1b[<0;1;1M');
+  stdin.emit('data', '\x1b[<0;1;1m');
+  await until(() => pty.written.map(String).join('').includes('\x1b[<0;1;1m'));
+  const sent = pty.written.map(String).join('');
+  expect(sent).toContain('\x1b[<0;1;1M');
+  expect(sent).toContain('\x1b[<0;1;1m');
+  await wait(50);
+  expect(copied).toHaveLength(1);
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);

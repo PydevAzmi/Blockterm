@@ -150,6 +150,7 @@ export async function runApp(o: {
     let lastDocHeight = 0;
     let selected: number | null = null;
     let mouseSel: MouseSelection | null = null;
+    let dragging = false;
     let revealSelected = false;
     let selectionNotice: string | null = null;
     let selectionNoticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -427,6 +428,7 @@ export async function runApp(o: {
 
     const applyLayout = (): void => {
       mouseSel = null;
+      dragging = false;
       const next = computeLayout({ cols: stdout.columns, rows: stdout.rows }, ui.open);
       const sizeChanged = next.pty.cols !== layout.pty.cols || next.pty.rows !== layout.pty.rows;
       layout = next;
@@ -913,8 +915,9 @@ export async function runApp(o: {
       return now - seenAt < APPROVAL_QUIET_MS || quiet < APPROVAL_QUIET_MS;
     };
 
-    // The wheel scrolls whichever area it is over. Other reports we asked for only to get the
-    // wheel are dropped; a program that asked for the mouse itself gets them in the shell area.
+    // The wheel scrolls whichever area it is over; blockterm also asks for drag reports to select
+    // in its panes. Other reports are dropped; a program that asked for the mouse itself gets them
+    // in the shell area. With no tracking, a shell-area wheel emulates the host's alternate scroll.
     const wheelEvent = (event: Extract<InputEvent, { type: 'mouse' }>): boolean => {
       const wheel = event.button & ~(4 | 8 | 16);
       const step = wheel === 64 ? 3 : wheel === 65 ? -3 : 0;
@@ -927,7 +930,16 @@ export async function runApp(o: {
         return true;
       }
       if (session.mirror.modes.mouseTrackingMode !== 'none') return false;
-      if (step !== 0 && session.view === 'blocks' && store.integrated) scrollBy(step);
+      if (step !== 0) {
+        if (session.view === 'blocks' && store.integrated) {
+          scrollBy(step);
+        } else {
+          const app = session.mirror.modes.applicationCursorKeysMode;
+          const arrow =
+            step > 0 ? (app ? '\x1bOA' : '\x1b[A') : app ? '\x1bOB' : '\x1b[B';
+          session.write(arrow + arrow + arrow);
+        }
+      }
       return true;
     };
 
@@ -949,6 +961,7 @@ export async function runApp(o: {
       if (event.type === 'help-key') {
         lastKeyAt = Date.now();
         mouseSel = null;
+        dragging = false;
         const result = reduce(ui, event);
         ui = result.ui;
         for (const action of result.actions) runAction(action);
@@ -966,16 +979,23 @@ export async function runApp(o: {
             const pane = paneAt(layout, event.row);
             if (!(pane === 'shell' && session.mirror.modes.mouseTrackingMode !== 'none')) {
               mouseSel = startSelection(layout, at);
+              dragging = mouseSel !== null;
               requestRender();
               return;
             }
-          } else if (event.action === 'motion' && left && mouseSel !== null) {
+            if (mouseSel !== null) {
+              mouseSel = null;
+              dragging = false;
+              requestRender();
+            }
+          } else if (event.action === 'motion' && left && dragging && mouseSel !== null) {
             mouseSel = extendSelection(mouseSel, layout, at);
             requestRender();
             return;
-          } else if (event.action === 'release' && mouseSel !== null) {
+          } else if (event.action === 'release' && dragging && mouseSel !== null) {
             const sel = extendSelection(mouseSel, layout, at);
             mouseSel = sel;
+            dragging = false;
             if (sel.moved && lastFrame !== null) {
               const text = selectedText(lastFrame, sel);
               if (text !== '') {
@@ -997,6 +1017,7 @@ export async function runApp(o: {
           event.type === 'agent-key')
       ) {
         mouseSel = null;
+        dragging = false;
         requestRender();
         if (event.type === 'bytes' && event.data === '\x1b') return;
       }
