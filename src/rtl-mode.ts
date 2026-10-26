@@ -1,5 +1,7 @@
 export type RtlSetting = 'auto' | 'on' | 'off';
 
+export const WINDOWS_CONSOLE_REASON = 'Windows console';
+
 export interface RtlMode {
   on: boolean;
   reason: string;
@@ -29,11 +31,11 @@ export function rtlMode(
   if (env.TERM_PROGRAM === 'Apple_Terminal') return { on: false, reason: 'Terminal.app does bidi' };
 
   if (has(env, 'WT_SESSION')) return { on: true, reason: 'Windows Terminal' };
-  if (platform === 'win32') return { on: true, reason: 'Windows console' };
   if (env.TERM_PROGRAM === 'vscode') return { on: true, reason: 'VS Code' };
   if (env.TERM_PROGRAM === 'iTerm.app') return { on: true, reason: 'iTerm2' };
   if (env.TERM_PROGRAM === 'WezTerm') return { on: true, reason: 'WezTerm' };
   if (env.TERM_PROGRAM === 'alacritty') return { on: true, reason: 'Alacritty' };
+  if (platform === 'win32') return { on: true, reason: WINDOWS_CONSOLE_REASON };
 
   return { on: false, reason: 'unknown terminal' };
 }

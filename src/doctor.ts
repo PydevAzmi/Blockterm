@@ -6,7 +6,7 @@ import type { LanguageModel } from 'ai';
 import { createModel, redact } from './agent/model.js';
 import type { Config } from './config.js';
 import { loadConfig } from './config.js';
-import { rtlMode } from './rtl-mode.js';
+import { rtlMode, WINDOWS_CONSOLE_REASON } from './rtl-mode.js';
 import { shellExists } from './shell.js';
 
 export interface Check {
@@ -66,7 +66,7 @@ export async function runDoctor(o: {
     name: 'rtl',
     ok: true,
     detail:
-      rtl.on && rtl.reason === 'Windows console'
+      rtl.on && rtl.reason === WINDOWS_CONSOLE_REASON
         ? `${rtlDetail} — Arabic needs a font with Arabic glyphs, or use Windows Terminal`
         : rtlDetail,
   });
