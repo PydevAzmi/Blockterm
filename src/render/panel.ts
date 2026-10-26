@@ -394,7 +394,7 @@ export function drawPanel(
         row,
         innerCol + promptWidth,
         Math.max(0, inputLineWidths[i]!),
-        'auto',
+        ui.card?.editing === true ? 'ltr' : 'auto',
         logicalRows,
       );
     }

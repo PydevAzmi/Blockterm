@@ -134,10 +134,26 @@ test('the shell cursor follows the reordered character', async () => {
   const m = await mirror(layout.pty.cols, layout.pty.rows, 'مر');
   const atEnd = composeFrame(m, layout, RTL_CHROME, true);
   expect(atEnd.cursor.col).toBe(2);
+  expect(rowText(atEnd, 0).slice(0, 2)).toBe('ﺮﻣ');
 
   await write(m, '\x1b[D');
   const back = composeFrame(m, layout, RTL_CHROME, true);
   expect(back.cursor.col).toBe(0);
+});
+
+test('shell rows under rtl keep leading indentation in place', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, '    مرحبا');
+  const f = composeFrame(m, layout, RTL_CHROME, true);
+  expect(rowText(f, 0).slice(0, 4)).toBe('    ');
+  expect(rowText(f, 0).slice(4, 9)).toBe('ﺎﺒﺣﺮﻣ');
+});
+
+test('shell rows under rtl keep columns of paths, numbers and trailing words', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, 'مرحبا.txt   12:00   ملف');
+  const f = composeFrame(m, layout, RTL_CHROME, true);
+  expect(rowText(f, 0).slice(0, 5)).toBe('ﺎﺒﺣﺮﻣ');
+  expect(rowText(f, 0).slice(5, 9)).toBe('.txt');
+  expect(rowText(f, 0).slice(12, 17)).toBe('12:00');
 });
 
 test('footer sits on the last row', async () => {

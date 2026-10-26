@@ -142,7 +142,7 @@ export function composeFrame(
         const copied = blockRow[c]!;
         put(r, left + c, copied.ch, copied.width, copied.sgr);
       }
-      if (reorder) reorderSpan(cells, cols, r, left, layout.pty.cols, 'auto', logical);
+      if (reorder) reorderSpan(cells, cols, r, left, layout.pty.cols, 'ltr', logical);
       continue;
     }
 
@@ -154,7 +154,7 @@ export function composeFrame(
       const copied = cellFrom(cell);
       put(r, left + c, copied.ch, copied.width, copied.sgr);
     }
-    if (reorder) reorderSpan(cells, cols, r, left, layout.pty.cols, 'auto', logical);
+    if (reorder) reorderSpan(cells, cols, r, left, layout.pty.cols, 'ltr', logical);
   }
 
   let cursor = {

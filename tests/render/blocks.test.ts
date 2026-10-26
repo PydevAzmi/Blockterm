@@ -380,6 +380,27 @@ test('frame uses the blocks renderer only when the store is integrated', async (
   expect(frame.cursor).toEqual({ row: 3, col: 2, visible: true });
 });
 
+test('rtl keeps the block command prompt marker on the left', async () => {
+  const { mirror, store } = await finishedBlock({ command: 'مرحبا', body: '' });
+  const layout = computeLayout({ cols: 40, rows: 12 });
+  const frame = composeFrame(
+    mirror,
+    layout,
+    {
+      title: 'blockterm',
+      footer: FOOTER,
+      view: 'blocks',
+      blocks: { store, scroll: 0 },
+      rtl: true,
+    },
+    true,
+  );
+  const header = frame.cells.slice(0, 40).map(cell => cell.ch).join('');
+  expect(header.startsWith('$ ')).toBe(true);
+  expect(frame.cells[0]!.ch).toBe('$');
+  expect(header).toContain('ﺎﺒﺣﺮﻣ');
+});
+
 test('slice 1 unchanged when the store is not integrated', async () => {
   const layout = computeLayout({ cols: 40, rows: 12 });
   const mirror = makeMirror(layout.pty.cols, layout.pty.rows);
