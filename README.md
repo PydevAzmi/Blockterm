@@ -152,6 +152,7 @@ The agent can also run a command at an idle prompt (`run_command`), list recent 
 | `shell` | shell to run instead of the default: a name on `PATH` (`bash`, `zsh`, `fish`, `nu`, `pwsh`, `cmd`) or a full path |
 | `shellArgs` | extra arguments for `shell`, e.g. `["--login"]` (default none) |
 | `agentColor` | color of agent replies: `cyan` (default), `magenta`, `bright-green`, …, `gray`, a 256-color number like `"141"`, or `"#7aa2f7"` |
+| `rtl` | Arabic/RTL display: `auto` (default), `on`, `off` |
 | `headers` | extra request headers, a map of header name to value (default `null`) |
 | `sessionHeader` | header name that carries one stable id per conversation (default `null`) |
 

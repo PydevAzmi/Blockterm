@@ -129,9 +129,62 @@ test('runDoctor: checks report in order and node passes on a modern runtime', as
     modelOverride: mockModel(true),
   });
 
-  expect(checks.map(check => check.name)).toEqual(['node', 'pty', 'shell', 'config', 'key', 'model']);
+  expect(checks.map(check => check.name)).toEqual(['node', 'pty', 'shell', 'rtl', 'config', 'key', 'model']);
   expect(checkNamed(checks, 'node').ok).toBe(true);
   expect(checkNamed(checks, 'model')).toEqual({ name: 'model', ok: true, detail: 'tool calls work' });
+});
+
+test('runDoctor: reports rtl right after shell even without a config', async () => {
+  const checks = await runDoctor({
+    ...base,
+    platform: 'win32',
+    configPath: join(tempDir(), 'missing.json'),
+    env: { WT_SESSION: 'x' },
+    modelOverride: mockModel(true),
+  });
+
+  expect(checks.map(check => check.name).slice(0, 5)).toEqual(['node', 'pty', 'shell', 'rtl', 'config']);
+  expect(checkNamed(checks, 'rtl')).toEqual({
+    name: 'rtl',
+    ok: true,
+    detail: 'on (Windows Terminal)',
+  });
+});
+
+test('runDoctor: the classic Windows console gets a font hint', async () => {
+  const checks = await runDoctor({
+    ...base,
+    platform: 'win32',
+    configPath: join(tempDir(), 'missing.json'),
+    env: {},
+    modelOverride: mockModel(true),
+  });
+
+  expect(checkNamed(checks, 'rtl')).toEqual({
+    name: 'rtl',
+    ok: true,
+    detail:
+      'on (Windows console) — Arabic needs a font with Arabic glyphs, or use Windows Terminal',
+  });
+});
+
+test('runDoctor: a config rtl off overrides detection', async () => {
+  const configPath = join(tempDir(), 'config.json');
+  saveConfig(configPath, { ...anthropic, rtl: 'off' });
+
+  const checks = await runDoctor({
+    ...base,
+    platform: 'win32',
+    configPath,
+    env: { WT_SESSION: 'x' },
+    modelOverride: mockModel(true),
+  });
+
+  expect(checkNamed(checks, 'rtl')).toEqual({
+    name: 'rtl',
+    ok: true,
+    detail: 'off (set in config)',
+  });
 });
 
 test('runDoctor: a missing config fails and skips key and model', async () => {
