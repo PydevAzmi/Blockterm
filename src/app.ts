@@ -175,10 +175,10 @@ export async function runApp(o: {
       const trackedModes = tracked.get();
       const status = statusText();
       const footerStatus =
-        status !== ''
-          ? status
-          : selectionNotice !== null
-            ? selectionNotice
+        selectionNotice !== null
+          ? selectionNotice
+          : status !== ''
+            ? status
             : selected !== null
               ? SELECTION_HINT
               : scroll > 0 && newOutput
@@ -863,6 +863,21 @@ export async function runApp(o: {
           break;
         case 'cancel-task':
           abortTask();
+          break;
+        case 'clear-chat':
+          if (taskController !== null) {
+            showSelectionNotice('Esc to cancel first', 2000);
+            requestRender();
+            break;
+          }
+          transcript.length = 0;
+          history = [];
+          sessionId = null;
+          model = null;
+          agentOpen = false;
+          agentScroll = 0;
+          transcript.push({ who: 'note', text: 'chat cleared' });
+          requestRender();
           break;
         case 'decide':
           decideCard(action.decision);

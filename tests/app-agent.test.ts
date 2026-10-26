@@ -358,6 +358,76 @@ test('an edited card is approved once the field is drawn and quiet', async () =>
   }
 });
 
+test('clear empties the transcript and starts a fresh conversation', async () => {
+  const model = new MockLanguageModelV4({
+    doStream: async () => textStream('first reply'),
+  });
+  const seen: (string | undefined)[] = [];
+  const factory = (_config: Config, sessionId?: string): ModelResult => {
+    seen.push(sessionId);
+    return { ok: true, model, label: CONFIG.model };
+  };
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: factory });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('first reply'));
+  await until(() => !output(stdout).includes('agent busy'));
+
+  stdin.emit('data', '\x0b');
+  stdin.emit('data', '\x0b');
+  stdin.emit('data', '/clear\r');
+  await until(() => output(stdout).includes('chat cleared'));
+
+  stdin.emit('data', 'hi\r');
+  await until(() => seen.length >= 2 && model.doStreamCalls.length >= 2);
+
+  const prompt = JSON.stringify(model.doStreamCalls[1]?.prompt);
+  expect(prompt).toContain('hi');
+  expect(prompt).not.toContain('hello');
+  expect(prompt).not.toContain('first reply');
+  expect(seen[0]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(seen[1]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(seen[1]).not.toBe(seen[0]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('ctrl+l while busy keeps the transcript and asks to cancel first', async () => {
+  let release: (() => void) | null = null;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return textStream('late');
+    },
+  });
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('agent busy'));
+  await until(() => release !== null);
+
+  try {
+    stdin.emit('data', '\x0c');
+    await wait(50);
+    const screen = output(stdout);
+    expect(screen).toContain('Esc to cancel first');
+    expect(screen).toContain('hello');
+    expect(screen).not.toContain('chat cleared');
+  } finally {
+    release?.();
+    pty.exit(0);
+  }
+
+  await expect(run).resolves.toBe(0);
+});
+
 test('a provider error adds a note pointing at blockterm doctor', async () => {
   const model = new MockLanguageModelV4({
     doStream: async () => {

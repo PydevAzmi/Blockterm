@@ -122,6 +122,18 @@ test('up and down walk submitted prompts and restore the draft', () => {
   expect(ui.historyAt).toBeUndefined();
 });
 
+test('/clear emits clear-chat instead of submitting', () => {
+  const r = reduce(panel({ input: ' /clear ' }), bytes('\r'));
+  expect(r.actions).toEqual([{ type: 'clear-chat' }]);
+  expect(r.ui.input).toBe('');
+  expect(r.ui.mode).toBe('idle');
+});
+
+test('ctrl+l in the panel emits clear-chat, also when busy', () => {
+  expect(reduce(panel(), bytes('\x0c')).actions).toEqual([{ type: 'clear-chat' }]);
+  expect(reduce(panel({ mode: 'busy' }), bytes('\x0c')).actions).toEqual([{ type: 'clear-chat' }]);
+});
+
 test('the same prompt twice in a row is stored once', () => {
   let ui = keysIn(panel(), 'ls\r');
   ui = keysIn({ ...ui, mode: 'idle' }, 'ls\r');

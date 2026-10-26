@@ -27,6 +27,7 @@ export type Action =
   | { type: 'submit'; text: string }
   | { type: 'cancel-task' }
   | { type: 'decide'; decision: Decision }
+  | { type: 'clear-chat' }
   | { type: 'layout-changed' };
 
 const ESC = '\x1b';
@@ -175,6 +176,7 @@ function plainBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[]
       actions: [{ type: 'layout-changed' }],
     };
   }
+  if (data === '\x0c') return { ui, actions: [{ type: 'clear-chat' }] };
   const key = CURSOR_KEYS[data];
   if (key !== undefined) {
     if (key === 'up') return historyUp(ui);
@@ -189,9 +191,14 @@ function plainBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[]
     if (ch === DEL || ch === BS) {
       next = deleteBefore(next);
     } else if (ch === '\r') {
-      const result = submit(next);
-      next = result.ui;
-      actions.push(...result.actions);
+      if (next.input.trim() === '/clear') {
+        next = { ...next, input: '', cursor: undefined };
+        actions.push({ type: 'clear-chat' });
+      } else {
+        const result = submit(next);
+        next = result.ui;
+        actions.push(...result.actions);
+      }
     } else if (isPrintable(ch)) {
       next = insertInput(next, ch);
     }
