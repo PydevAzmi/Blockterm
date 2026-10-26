@@ -152,6 +152,7 @@ The agent can also run a command at an idle prompt (`run_command`), list recent 
 | `shell` | shell to run instead of the default: a name on `PATH` (`bash`, `zsh`, `fish`, `nu`, `pwsh`, `cmd`) or a full path |
 | `shellArgs` | extra arguments for `shell`, e.g. `["--login"]` (default none) |
 | `agentColor` | color of agent replies: `cyan` (default), `magenta`, `bright-green`, …, `gray`, a 256-color number like `"141"`, or `"#7aa2f7"` |
+| `rtl` | Arabic/RTL display: `auto` (default), `on`, `off` |
 | `headers` | extra request headers, a map of header name to value (default `null`) |
 | `sessionHeader` | header name that carries one stable id per conversation (default `null`) |
 
@@ -176,7 +177,7 @@ The agent can also run a command at an idle prompt (`run_command`), list recent 
 
 ### Agent line
 
-`ctrl+k` turns the mode line into the agent's input, labelled with the mode in parentheses: `(agent · your-model) ❯`. A few rows above it show the conversation (scroll it with the wheel); the agent's replies are short and drawn in `agentColor`. `ctrl+k` again returns focus to the shell; `Esc` closes the line (or cancels a running task). Type `/clear` or press `ctrl+l` in the agent line to start a fresh chat without restarting blockterm.
+`ctrl+k` turns the mode line into the agent's input, labelled with the mode in parentheses: `(agent · your-model) ❯`. A few rows above it show the conversation (scroll it with the wheel); the agent's replies are short and drawn in `agentColor`. Arabic and other RTL text in the transcript, input line and approval card is drawn joined and right to left on hosts without their own bidi support (setting `rtl`). `ctrl+k` again returns focus to the shell; `Esc` closes the line (or cancels a running task). Type `/clear` or press `ctrl+l` in the agent line to start a fresh chat without restarting blockterm.
 
 ### Privacy
 

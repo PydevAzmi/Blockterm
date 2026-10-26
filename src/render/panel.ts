@@ -2,6 +2,7 @@ import { escapeControl } from '../agent/keys.js';
 import type { PanelUi } from '../focus.js';
 import type { Rect } from '../layout.js';
 import type { Cell } from './frame.js';
+import { reorderSpan, visualCol, type LogicalRow } from './rtl.js';
 
 export interface Transcript {
   who: 'you' | 'agent' | 'tool' | 'error' | 'note';
@@ -16,6 +17,8 @@ export interface PanelView extends PanelUi {
   status?: string;
   /** Transcript lines scrolled up from the newest. */
   scroll?: number;
+  /** Draw Arabic and other RTL text shaped, right to left. */
+  rtl?: boolean;
 }
 
 export interface CardView {
@@ -110,8 +113,10 @@ export function drawPanel(
   ui: PanelView,
   transcript: Transcript[],
   card: CardView | null,
+  logical?: Map<number, LogicalRow>,
 ): PanelDrawResult {
   const totalRows = Math.floor(cells.length / frameCols);
+  const logicalRows = logical ?? new Map<number, LogicalRow>();
 
   const put = (row: number, col: number, ch: string, width: 0 | 1 | 2, sgr: string): void => {
     if (row < 0 || row >= totalRows || col < 0 || col >= frameCols) return;
@@ -352,23 +357,47 @@ export function drawPanel(
   const shown = lines.slice(Math.max(0, lines.length - available - scroll), lines.length - scroll);
   const transcriptTop = contentEnd + 1 - cardHeight - shown.length;
   for (let i = 0; i < shown.length; i += 1) {
-    writeRun(transcriptTop + i, innerCol, shown[i]!.text, shown[i]!.sgr, innerCols);
+    const row = transcriptTop + i;
+    writeRun(row, innerCol, shown[i]!.text, shown[i]!.sgr, innerCols);
+    if (ui.rtl === true) {
+      reorderSpan(cells, frameCols, row, innerCol, innerCols, 'auto', logicalRows);
+    }
   }
 
   if (card !== null) {
     let row = contentEnd + 1 - cardHeight;
     for (const rowCells of cardShown) {
       drawCells(row, innerCol, rowCells);
+      if (ui.rtl === true) {
+        reorderSpan(cells, frameCols, row, innerCol + 2, innerCols - 2, 'ltr', logicalRows);
+      }
       row += 1;
     }
   }
 
   let endX = innerCol + promptWidth;
   const labelSgr = focused ? `1;${color}` : DIM;
+  const inputLineWidths = inputLines.map(line =>
+    Math.min(
+      Array.from(line).reduce((sum, ch) => sum + charWidth(ch), 0),
+      innerCols - promptWidth,
+    ),
+  );
   for (let i = 0; i < inputLines.length; i += 1) {
     const row = inputTop + i;
     const x = i === 0 ? writeRun(row, innerCol, prompt, labelSgr, promptWidth) : innerCol + promptWidth;
     endX = writeRun(row, x, inputLines[i]!, '', innerCols - promptWidth);
+    if (ui.rtl === true) {
+      reorderSpan(
+        cells,
+        frameCols,
+        row,
+        innerCol + promptWidth,
+        Math.max(0, inputLineWidths[i]!),
+        ui.card?.editing === true ? 'ltr' : 'auto',
+        logicalRows,
+      );
+    }
   }
 
   const status = ui.status ?? '';
@@ -377,11 +406,17 @@ export function drawPanel(
     writeRun(inputRow, innerCol + innerCols - statusWidth, status, '33', statusWidth);
   }
 
-  const cursor = focused
-    ? {
-        row: inputTop + (cursorPosition.line - inputStart),
-        col: innerCol + promptWidth + cursorPosition.col,
-      }
-    : null;
+  const cursorRow = inputTop + (cursorPosition.line - inputStart);
+  let cursorCol = innerCol + promptWidth + cursorPosition.col;
+  if (focused && ui.rtl === true) {
+    const logicalCursor = logicalRows.get(cursorRow);
+    if (logicalCursor !== undefined) {
+      const lineIndex = cursorPosition.line - inputStart;
+      const lineWidth = inputLineWidths[lineIndex] ?? cursorPosition.col;
+      const end = innerCol + promptWidth + lineWidth;
+      cursorCol = visualCol(logicalCursor.map, cursorCol, end);
+    }
+  }
+  const cursor = focused ? { row: cursorRow, col: cursorCol } : null;
   return { cursor, cardTruncated, inputTruncated, scroll };
 }

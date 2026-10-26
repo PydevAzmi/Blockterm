@@ -135,6 +135,7 @@ function startApp(o: {
   copy?: (text: string) => void;
   cols?: number;
   rows?: number;
+  rtl?: boolean;
 } = {}): {
   run: Promise<number>;
   pty: FakePty;
@@ -152,6 +153,7 @@ function startApp(o: {
     loadConfig: o.load ?? (() => LOADED),
     ...(o.model !== undefined ? { modelFactory: o.model } : {}),
     ...(o.copy !== undefined ? { copy: o.copy } : {}),
+    ...(o.rtl !== undefined ? { rtl: o.rtl } : {}),
   });
   return { run, pty, stdin, stdout };
 }
@@ -1078,6 +1080,24 @@ test('a drag in the shell copies the selected text and shows the footer notice',
   await until(() => copied.length === 1);
   expect(copied).toEqual(['hello']);
   await until(() => output(stdout).includes('copied 5 chars'));
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('a drag over Arabic shell output copies the logical text', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text), rtl: true });
+
+  pty.emit('مرحبا');
+  await until(() => output(stdout).includes('ﺎﺒﺣﺮﻣ'));
+
+  stdin.emit('data', '\x1b[<0;1;1M');
+  stdin.emit('data', '\x1b[<32;5;1M');
+  stdin.emit('data', '\x1b[<0;5;1m');
+
+  await until(() => copied.length === 1);
+  expect(copied).toEqual(['مرحبا']);
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);

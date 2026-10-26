@@ -17,6 +17,8 @@ export interface Config {
   shellArgs?: string[];
   /** Color of agent replies: a name (cyan, bright-magenta, ...), 0-255, or #rrggbb. */
   agentColor?: string;
+  /** Arabic/RTL shaping and bidi: auto-detect, on, or off. */
+  rtl?: 'auto' | 'on' | 'off';
   headers: Record<string, string> | null;
   sessionHeader: string | null;
 }
@@ -135,6 +137,11 @@ export function validateConfig(raw: unknown): LoadResult {
     return invalid('agentColor must be a color name, 0-255, or #rrggbb');
   }
 
+  const rtl = raw.rtl;
+  if (rtl !== undefined && rtl !== 'auto' && rtl !== 'on' && rtl !== 'off') {
+    return invalid('rtl must be "auto", "on" or "off"');
+  }
+
   const rawHeaders = raw.headers === undefined ? null : raw.headers;
   let headers: Record<string, string> | null = null;
   if (rawHeaders !== null) {
@@ -168,6 +175,7 @@ export function validateConfig(raw: unknown): LoadResult {
       shell,
       ...(shellArgs !== undefined ? { shellArgs: shellArgs as string[] } : {}),
       ...(agentColor !== undefined ? { agentColor } : {}),
+      ...(rtl !== undefined ? { rtl } : {}),
       headers,
       sessionHeader,
     },

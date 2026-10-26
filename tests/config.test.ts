@@ -199,6 +199,27 @@ test('validateConfig: rejects an unknown agentColor', () =>
     message: 'agentColor must be a color name, 0-255, or #rrggbb',
   }));
 
+test('validateConfig: accepts rtl auto, on and off', () => {
+  for (const rtl of ['auto', 'on', 'off'] as const) {
+    const result = validateConfig({ ...anthropic, rtl });
+    expect(result.ok && result.config.rtl).toBe(rtl);
+  }
+});
+
+test('validateConfig: rejects an unknown rtl', () =>
+  expect(validateConfig({ ...anthropic, rtl: 'sideways' })).toEqual({
+    ok: false,
+    reason: 'invalid',
+    message: 'rtl must be "auto", "on" or "off"',
+  }));
+
+test('saveConfig: round-trips rtl', () => {
+  const file = join(tempDir(), 'config.json');
+  const config: Config = { ...anthropic, rtl: 'on' };
+  saveConfig(file, config);
+  expect(loadConfig(file)).toEqual({ ok: true, config });
+});
+
 test('colorSgr maps specs to SGR and defaults to cyan', () => {
   expect(colorSgr(null)).toBe('36');
   expect(colorSgr('magenta')).toBe('35');

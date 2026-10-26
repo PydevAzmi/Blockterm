@@ -305,3 +305,73 @@ test('cursor at the start of a long wrapped input stays on a visible row', () =>
   expect(r.cursor!.row).toBeGreaterThanOrEqual(RECT.row);
   expect(r.cursor!.row).toBeLessThanOrEqual(INPUT_ROW);
 });
+
+test('with rtl on, a mixed Arabic transcript line reads right to left', () => {
+  const cs = blank();
+  drawPanel(
+    cs,
+    FRAME_COLS,
+    RECT,
+    ui({ rtl: true }),
+    [{ who: 'agent', text: 'مرحبا hello عالم' }],
+    null,
+  );
+  const row = rowText(cs, INPUT_ROW - 1).trimEnd();
+  expect(row.endsWith('ﻣ')).toBe(true);
+  const hello = row.indexOf('hello');
+  expect(hello).toBeGreaterThan(0);
+  expect(row.slice(hello + 'hello'.length)).toContain('ﺎﺒﺣﺮﻣ');
+  expect(row.slice(0, hello)).toMatch(/[\uFE70-\uFEFF]/);
+});
+
+test('with rtl on, Arabic input is shaped and reversed with the cursor at the end', () => {
+  const cs = blank();
+  const promptWidth = '(agent) ❯ '.length;
+  const r = drawPanel(cs, FRAME_COLS, RECT, ui({ rtl: true, input: 'مر' }), [], null);
+  expect(rowText(cs, INPUT_ROW).slice(promptWidth, promptWidth + 2)).toBe('ﺮﻣ');
+  expect(r.cursor).toEqual({ row: INPUT_ROW, col: promptWidth + 2 });
+});
+
+test('with rtl on, the input cursor follows logical order', () => {
+  const cs = blank();
+  const promptWidth = '(agent) ❯ '.length;
+  const r = drawPanel(cs, FRAME_COLS, RECT, ui({ rtl: true, input: 'مر', cursor: 1 }), [], null);
+  expect(r.cursor).toEqual({ row: INPUT_ROW, col: promptWidth + 0 });
+});
+
+test('with rtl on, the card payload is shaped and reversed with the chip after it', () => {
+  const cs = blank();
+  const parsed = parseKeys('مرحبا<Enter>');
+  const tokens = parsed.ok ? displayTokens(parsed.tokens) : [];
+  drawPanel(cs, FRAME_COLS, RECT, ui({ rtl: true }), [], { target: 'pwsh', tokens });
+  expect(rowText(cs, 7).trimEnd()).toBe('▌   ﺎﺒﺣﺮﻣ  ⏎ Enter');
+});
+
+test('with rtl on, an edited Arabic input keeps the Enter hint after the shaped text', () => {
+  const cs = blank();
+  const promptWidth = '(agent) ❯ '.length;
+  const editUi = ui({
+    rtl: true,
+    input: 'مرحبا<Enter>',
+    card: { keys: 'مرحبا\r', target: 'pwsh', editing: true, denying: false },
+  });
+  drawPanel(cs, FRAME_COLS, RECT, editUi, [], lsCard);
+  const expected = '\uFE8E\uFE92\uFEA3\uFEAE\uFEE3<Enter>';
+  expect(rowText(cs, INPUT_ROW).slice(promptWidth, promptWidth + expected.length)).toBe(expected);
+});
+
+test('with rtl on, the card payload keeps ls before the shaped Arabic run', () => {
+  const cs = blank();
+  const parsed = parseKeys('ls مرحبا<Enter>');
+  const tokens = parsed.ok ? displayTokens(parsed.tokens) : [];
+  drawPanel(cs, FRAME_COLS, RECT, ui({ rtl: true }), [], { target: 'pwsh', tokens });
+  expect(rowText(cs, 7).trimEnd()).toBe('▌   ls \uFE8E\uFE92\uFEA3\uFEAE\uFEE3  ⏎ Enter');
+});
+
+test('with rtl off, Arabic input stays logical and unshaped', () => {
+  const cs = blank();
+  const promptWidth = '(agent) ❯ '.length;
+  const r = drawPanel(cs, FRAME_COLS, RECT, ui({ input: 'مر' }), [], null);
+  expect(rowText(cs, INPUT_ROW).slice(promptWidth, promptWidth + 2)).toBe('مر');
+  expect(r.cursor).toEqual({ row: INPUT_ROW, col: promptWidth + 2 });
+});

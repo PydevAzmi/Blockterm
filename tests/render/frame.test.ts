@@ -31,6 +31,8 @@ function rowText(f: Frame, row: number): string {
     .join('');
 }
 
+const RTL_CHROME = { title: 'blockterm', footer: FOOTER, view: 'blocks' as const, rtl: true };
+
 const thirtyLines = Array.from({ length: 30 }, (_, i) => `L${i}`).join('\r\n');
 
 test('mirror text starts at the top-left corner with no frame', async () => {
@@ -102,6 +104,56 @@ test('cursor follows the mirror', async () => {
   expect(shown.cursor).toEqual({ row: 0, col: 2, visible: true });
   const hidden = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, false);
   expect(hidden.cursor.visible).toBe(false);
+});
+
+test('Arabic shell output is shaped and drawn right to left', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, 'echo مرحبا\r\nمرحبا');
+  const f = composeFrame(m, layout, RTL_CHROME, true);
+  expect(rowText(f, 1).slice(0, 5)).toBe('ﺎﺒﺣﺮﻣ');
+  expect(f.logical?.get(1)?.cells.map(c => c.ch).join('').slice(0, 5)).toBe('مرحبا');
+});
+
+test('Arabic shell output in the alt screen is untouched', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, '\x1b[?1049hمرحبا');
+  const f = composeFrame(m, layout, { ...RTL_CHROME, view: 'fullscreen' }, true);
+  expect(rowText(f, 0).slice(0, 5)).toBe('مرحبا');
+  expect(f.logical?.size ?? 0).toBe(0);
+});
+
+test('rtl off or missing leaves the shell row untouched', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, 'مرحبا');
+  const off = composeFrame(m, layout, { ...RTL_CHROME, rtl: false }, true);
+  expect(rowText(off, 0).slice(0, 5)).toBe('مرحبا');
+  expect(off.logical?.size ?? 0).toBe(0);
+
+  const missing = composeFrame(m, layout, { title: 'blockterm', footer: FOOTER, view: 'blocks' }, true);
+  expect(rowText(missing, 0).slice(0, 5)).toBe('مرحبا');
+});
+
+test('the shell cursor follows the reordered character', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, 'مر');
+  const atEnd = composeFrame(m, layout, RTL_CHROME, true);
+  expect(atEnd.cursor.col).toBe(2);
+  expect(rowText(atEnd, 0).slice(0, 2)).toBe('ﺮﻣ');
+
+  await write(m, '\x1b[D');
+  const back = composeFrame(m, layout, RTL_CHROME, true);
+  expect(back.cursor.col).toBe(0);
+});
+
+test('shell rows under rtl keep leading indentation in place', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, '    مرحبا');
+  const f = composeFrame(m, layout, RTL_CHROME, true);
+  expect(rowText(f, 0).slice(0, 4)).toBe('    ');
+  expect(rowText(f, 0).slice(4, 9)).toBe('ﺎﺒﺣﺮﻣ');
+});
+
+test('shell rows under rtl keep columns of paths, numbers and trailing words', async () => {
+  const m = await mirror(layout.pty.cols, layout.pty.rows, 'مرحبا.txt   12:00   ملف');
+  const f = composeFrame(m, layout, RTL_CHROME, true);
+  expect(rowText(f, 0).slice(0, 5)).toBe('ﺎﺒﺣﺮﻣ');
+  expect(rowText(f, 0).slice(5, 9)).toBe('.txt');
+  expect(rowText(f, 0).slice(12, 17)).toBe('12:00');
 });
 
 test('footer sits on the last row', async () => {

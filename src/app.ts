@@ -42,6 +42,7 @@ import { drawHelp } from './render/help.js';
 import { drawPanel } from './render/panel.js';
 import type { CardView, Transcript } from './render/panel.js';
 import { createFrameScheduler, createRunningTicker } from './render/schedule.js';
+import { rtlMode } from './rtl-mode.js';
 import { moveSelection, selectionKey } from './selection.js';
 import type { SelectionKey } from './selection.js';
 import { shellName } from './shell.js';
@@ -75,6 +76,7 @@ export async function runApp(o: {
   loadConfig?: () => LoadResult;
   modelFactory?: (config: Config, sessionId?: string) => ModelResult;
   copy?: (text: string) => void;
+  rtl?: boolean;
 }): Promise<number> {
   const { shell, stdin, stdout } = o;
   const copy = o.copy ?? ((text: string): void => copyText(text, { writeHost: s => stdout.write(s) }));
@@ -98,6 +100,7 @@ export async function runApp(o: {
     const loaded = load();
     const config: Config | null = loaded.ok ? loaded.config : null;
     const agentColor = colorSgr(config?.agentColor ?? null);
+    const rtl = o.rtl ?? rtlMode(config?.rtl, process.env, process.platform).on;
     const mode = shellName(shell.file);
     let model: LanguageModel | null = null;
     let modelLabel: string | undefined = config?.model;
@@ -209,6 +212,7 @@ export async function runApp(o: {
           footerStatus,
           view: session.view,
           blocks: { store, scroll, hash: hashView(), selected },
+          rtl,
         },
         trackedModes.cursorVisible,
       );
@@ -259,9 +263,17 @@ export async function runApp(o: {
           frame.cells,
           frame.cols,
           layout.panel.rect,
-          { ...ui, model: modelLabel, color: agentColor, status: footerStatus, scroll: agentScroll },
+          {
+            ...ui,
+            rtl,
+            model: modelLabel,
+            color: agentColor,
+            status: footerStatus,
+            scroll: agentScroll,
+          },
           transcript,
           card,
+          frame.logical,
         );
         agentScroll = panel.scroll;
         if (card !== null) {

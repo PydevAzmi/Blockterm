@@ -86,10 +86,27 @@ export function selectedText(frame: Frame, sel: MouseSelection): string {
     const { from, to } = rowSpan(frame, row, startCol, endCol);
 
     let text = '';
-    for (let col = from; col <= to; col += 1) {
-      const cell = frame.cells[row * frame.cols + col];
-      if (cell === undefined || cell.width === 0) continue;
-      text += cell.ch;
+    const logical = frame.logical?.get(row);
+    if (logical !== undefined) {
+      let first = Number.POSITIVE_INFINITY;
+      let last = Number.NEGATIVE_INFINITY;
+      for (let col = from; col <= to; col += 1) {
+        const logicalCol = logical.map[col];
+        if (logicalCol === undefined) continue;
+        if (logicalCol < first) first = logicalCol;
+        if (logicalCol > last) last = logicalCol;
+      }
+      for (let col = first; col <= last; col += 1) {
+        const cell = logical.cells[col];
+        if (cell === undefined || cell.width === 0) continue;
+        text += cell.ch;
+      }
+    } else {
+      for (let col = from; col <= to; col += 1) {
+        const cell = frame.cells[row * frame.cols + col];
+        if (cell === undefined || cell.width === 0) continue;
+        text += cell.ch;
+      }
     }
     lines.push(text.replace(/ +$/, ''));
   }
