@@ -3,6 +3,7 @@ import type { IBufferCell, Terminal } from '@xterm/headless';
 import type { Layout } from '../layout.js';
 import type { View } from '../term/session.js';
 import { composeBlocks, type BlockRow, type BlocksView } from './blocks.js';
+import { reorderSpan, visualCol, type LogicalRow } from './rtl.js';
 
 export interface Cell {
   ch: string;
@@ -17,6 +18,7 @@ export interface Frame {
   cursor: { row: number; col: number; visible: boolean };
   blocksDocHeight?: number;
   blockRows?: BlockRow[];
+  logical?: Map<number, LogicalRow>;
 }
 
 export interface Chrome {
@@ -27,6 +29,7 @@ export interface Chrome {
   footerStatus?: string;
   blocks?: BlocksView;
   now?: number;
+  rtl?: boolean;
 }
 
 export const FOOTER = 'F1 help · ctrl+k agent';
@@ -123,6 +126,8 @@ export function composeFrame(
   const reCell = active.getNullCell();
   const top = layout.origin.row;
   const left = layout.origin.col;
+  const reorder = chrome.rtl === true && chrome.view === 'blocks';
+  const logical = new Map<number, LogicalRow>();
   const blocks =
     chrome.view === 'blocks' && chrome.blocks !== undefined && chrome.blocks.store.integrated
       ? composeBlocks(mirror, chrome.blocks, layout.pty, chrome.now ?? Date.now())
@@ -137,6 +142,7 @@ export function composeFrame(
         const copied = blockRow[c]!;
         put(r, left + c, copied.ch, copied.width, copied.sgr);
       }
+      if (reorder) reorderSpan(cells, cols, r, left, layout.pty.cols, 'auto', logical);
       continue;
     }
 
@@ -148,6 +154,7 @@ export function composeFrame(
       const copied = cellFrom(cell);
       put(r, left + c, copied.ch, copied.width, copied.sgr);
     }
+    if (reorder) reorderSpan(cells, cols, r, left, layout.pty.cols, 'auto', logical);
   }
 
   let cursor = {
@@ -164,6 +171,11 @@ export function composeFrame(
         : { ...cursor, visible: false };
   }
 
+  const logicalCursor = logical.get(cursor.row);
+  if (logicalCursor !== undefined) {
+    cursor = { ...cursor, col: visualCol(logicalCursor.map, cursor.col, cursor.col) };
+  }
+
   return {
     cols,
     rows,
@@ -171,5 +183,6 @@ export function composeFrame(
     cursor,
     blocksDocHeight: blocks?.docHeight,
     blockRows: blocks?.blockRows,
+    logical,
   };
 }

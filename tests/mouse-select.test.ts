@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import type { Frame, Cell } from '../src/render/frame.js';
 import { computeLayout } from '../src/layout.js';
 import { extendSelection, highlight, paneAt, selectedText, startSelection } from '../src/mouse-select.js';
+import { reorderSpan, type LogicalRow } from '../src/render/rtl.js';
 
 function charWidth(ch: string): 1 | 2 {
   const cp = ch.codePointAt(0)!;
@@ -68,6 +69,19 @@ test('starting or ending on a wide char half copies it once', () => {
   const f = frameOf(['a世b       ']); // cells: a, 世, '', b
   expect(selectedText(f, { pane: 'shell', anchor: { row: 0, col: 2 }, head: { row: 0, col: 3 }, moved: true })).toBe('世b');
   expect(selectedText(f, { pane: 'shell', anchor: { row: 0, col: 0 }, head: { row: 0, col: 1 }, moved: true })).toBe('a世');
+});
+
+test('selection over a reordered row copies the logical text and highlights visual cells', () => {
+  const f = frameOf(['مرحبا']);
+  const logical = new Map<number, LogicalRow>();
+  reorderSpan(f.cells, f.cols, 0, 0, f.cols, 'auto', logical);
+  f.logical = logical;
+
+  const sel = { pane: 'shell', anchor: { row: 0, col: 0 }, head: { row: 0, col: 4 }, moved: true } as const;
+  expect(selectedText(f, sel)).toBe('مرحبا');
+
+  highlight(f, sel);
+  expect(f.cells.slice(0, 5).map(c => c.sgr)).toEqual(['7', '7', '7', '7', '7']);
 });
 
 test('extendSelection clamps to the starting pane and the right edge', () => {
