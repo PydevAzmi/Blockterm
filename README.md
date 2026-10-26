@@ -75,8 +75,6 @@ Install Node 24 with fnm, nvm or the official installer.
 npm i -g blockterm
 ```
 
-The npm package is available after the first release; until then, build from source below.
-
 Node 24's npm blocks dependency install scripts by default. Windows and macOS use node-pty's
 prebuilds; on Linux, allow its build:
 

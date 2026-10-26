@@ -287,11 +287,12 @@ eval "$(fnm env)" &amp;&amp; fnm install 24 &amp;&amp; fnm use 24</code><button 
         </li>
         <li>
           <div>
-            <p class="step-title">Build blockterm from source</p>
-            <div class="cmdline"><code>git clone https://github.com/PydevAzmi/Blockterm.git
-cd Blockterm
-npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="button" aria-label="Copy the build commands">Copy</button></div>
-            <p class="soon">On Linux, building needs <code>python3</code>, <code>make</code> and <code>g++</code>. <code>npm i -g blockterm</code> arrives with the first release.</p>
+            <p class="step-title">Install blockterm</p>
+            <div class="os">
+              <span>Windows, macOS</span><div class="cmdline"><code>npm i -g blockterm</code><button type="button" aria-label="Copy the install command">Copy</button></div>
+              <span>Linux</span><div class="cmdline"><code>npm i -g --allow-scripts=node-pty blockterm</code><button type="button" aria-label="Copy the Linux install command">Copy</button></div>
+            </div>
+            <p class="soon">On Linux, node-pty builds from source and needs <code>python3</code>, <code>make</code> and <code>g++</code>.</p>
           </div>
         </li>
         <li>
@@ -369,12 +370,14 @@ npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="but
             <li><span class="mark ok">✔</span><span>Block selection, copy and rerun</span></li>
             <li><span class="mark ok">✔</span><span>Drag to copy text from the shell or the agent line</span></li>
             <li><span class="mark ok">✔</span><span>F1 help</span></li>
+            <li><span class="mark ok">✔</span><span>On npm: <code>npm i -g blockterm</code></span></li>
           </ul>
         </div>
         <div>
-          <p class="step-title">In progress</p>
+          <p class="step-title">Not yet</p>
           <ul class="status">
-            <li><span class="mark dim-ink">○</span><span>First release on npm (<code>npm install -g blockterm</code>)</span></li>
+            <li><span class="mark dim-ink">○</span><span>Blocks in WSL bash</span></li>
+            <li><span class="mark dim-ink">○</span><span>Blocks in PowerShell 7 on macOS</span></li>
           </ul>
         </div>
       </div>
