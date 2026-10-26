@@ -187,6 +187,16 @@ test('y approves with allowRest false and clears the card', () => {
   expect(r.ui.card).toBeNull();
 });
 
+test('Enter approves an idle card', () => {
+  expect(reduce(withCard(), bytes('\r')).actions).toEqual([
+    { type: 'decide', decision: { kind: 'approve', keys: 'rm -rf\r', allowRest: false } },
+  ]);
+});
+
+test('Enter does nothing on a truncated card', () => {
+  expect(reduce(truncatedCard(), bytes('\r')).actions).toEqual([]);
+});
+
 test('a approves and allows the rest of the task', () => {
   const r = reduce(withCard(), bytes('a'));
   expect(r.actions).toEqual([

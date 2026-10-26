@@ -32,6 +32,7 @@ test('HELP_LINES is the exact help copy', () => {
     'shift+drag    select text; your terminal copies it',
     'ctrl+l        clear blocks (idle prompt)',
     'ctrl+l        clear agent chat (agent line)',
+    'y / Enter     approve · e edit · n deny · a all',
     'F1 / Esc      close this help',
     "ctrl+k replaces readline's kill-line and vim's ctrl+k digraphs.",
   ]);

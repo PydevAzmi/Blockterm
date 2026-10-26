@@ -104,7 +104,7 @@ test('the agent runs a write end to end through openai-compatible', async () => 
     p.write('\x0b');
     p.write('say ok\r');
 
-    await waitFor(() => screen(host).includes('Type into'), 30000);
+    await waitFor(() => screen(host).includes('wants to type into'), 30000);
     await new Promise(resolve => setTimeout(resolve, 500));
     p.write('y');
 

@@ -239,7 +239,7 @@ test('approving the card types the keys into the pty', async () => {
   stdin.emit('data', '\x0b');
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
-  await until(() => output(stdout).includes('Type into'));
+  await until(() => output(stdout).includes('wants to type into'));
   await wait(450);
   stdin.emit('data', 'y');
   await until(() => pty.written.some(w => String(w).includes('echo hi\r')));
@@ -260,7 +260,7 @@ test('an approval waits for a quiet pause after the card is shown', async () => 
     stdin.emit('data', 'hello\r');
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(50);
-    expect(output(stdout)).toContain('Type into');
+    expect(output(stdout)).toContain('wants to type into');
 
     for (let i = 0; i < 5; i += 1) {
       stdin.emit('data', 'y');
@@ -280,6 +280,54 @@ test('an approval waits for a quiet pause after the card is shown', async () => 
   }
 });
 
+test('enter approves only after a quiet pause', async () => {
+  const model = sendKeysThenDone();
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('wants to type into'));
+  await wait(10);
+  stdin.emit('data', '\r');
+  await wait(20);
+  expect(pty.written).toHaveLength(0);
+
+  await wait(450);
+  stdin.emit('data', '\r');
+  await until(() => pty.written.some(w => String(w).includes('echo hi\r')));
+  expect(pty.written.map(String).join('')).toContain('echo hi\r');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('enter in the same tick the card appears does not approve', async () => {
+  vi.useFakeTimers();
+  try {
+    const model = sendKeysThenDone();
+    const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+    stdin.emit('data', '\x0b');
+    await vi.advanceTimersByTimeAsync(0);
+    stdin.emit('data', 'hello\r');
+    await vi.advanceTimersByTimeAsync(0);
+    stdin.emit('data', '\r');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(output(stdout)).toContain('wants to type into');
+    expect(pty.written).toHaveLength(0);
+
+    stdin.emit('data', '\r');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(pty.written).toHaveLength(0);
+
+    pty.exit(0);
+    await expect(run).resolves.toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test('an edit-and-enter sent right after the card is ignored', async () => {
   vi.useFakeTimers();
   try {
@@ -291,7 +339,7 @@ test('an edit-and-enter sent right after the card is ignored', async () => {
     stdin.emit('data', 'hello\r');
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(50);
-    expect(output(stdout)).toContain('Type into');
+    expect(output(stdout)).toContain('wants to type into');
 
     stdin.emit('data', 'e\r');
     await vi.advanceTimersByTimeAsync(20);
@@ -315,7 +363,7 @@ test('type-ahead right after a card does not approve unseen keys', async () => {
     stdin.emit('data', 'hello\r');
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(50);
-    expect(output(stdout)).toContain('Type into');
+    expect(output(stdout)).toContain('wants to type into');
 
     for (const ch of ['m', 'a', 'k', 'e', '\r']) {
       stdin.emit('data', ch);
@@ -341,7 +389,7 @@ test('an edited card is approved once the field is drawn and quiet', async () =>
     stdin.emit('data', 'hello\r');
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(50);
-    expect(output(stdout)).toContain('Type into');
+    expect(output(stdout)).toContain('wants to type into');
 
     await vi.advanceTimersByTimeAsync(450);
     stdin.emit('data', 'e');
@@ -453,7 +501,7 @@ test('the transcript shows the agent reply', async () => {
   stdin.emit('data', '\x0b');
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
-  await until(() => output(stdout).includes('Type into'));
+  await until(() => output(stdout).includes('wants to type into'));
   await wait(450);
   stdin.emit('data', 'y');
   await until(() => output(stdout).includes('done'));
@@ -470,7 +518,7 @@ test('ctrl+k while a card is pending returns focus to the terminal', async () =>
   stdin.emit('data', '\x0b');
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
-  await until(() => output(stdout).includes('Type into'));
+  await until(() => output(stdout).includes('wants to type into'));
 
   stdin.emit('data', '\x0b');
   await wait(5);
@@ -633,7 +681,7 @@ test('an edit whose keys do not all fit is not approved by enter', async () => {
   stdin.emit('data', '\x0b');
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
-  await until(() => output(stdout).includes('Type into'));
+  await until(() => output(stdout).includes('wants to type into'));
   await wait(450);
   stdin.emit('data', 'e');
   await wait(450);
@@ -657,7 +705,7 @@ test('the same edit fits and is approved in a wider panel', async () => {
   stdin.emit('data', '\x0b');
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
-  await until(() => output(stdout).includes('Type into'));
+  await until(() => output(stdout).includes('wants to type into'));
   await wait(450);
   stdin.emit('data', 'e');
   await wait(450);
@@ -726,7 +774,7 @@ test('an edit field that fits after a resize still needs a fresh quiet pause bef
     stdin.emit('data', 'hello\r');
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(50);
-    expect(output(stdout)).toContain('Type into');
+    expect(output(stdout)).toContain('wants to type into');
 
     await vi.advanceTimersByTimeAsync(450);
     stdin.emit('data', 'e');
@@ -802,7 +850,7 @@ test('shell exit mid-task resolves the exit code and aborts the task', async () 
   stdin.emit('data', '\x0b');
   await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
   stdin.emit('data', 'hello\r');
-  await until(() => output(stdout).includes('Type into'));
+  await until(() => output(stdout).includes('wants to type into'));
 
   pty.exit(3);
   await expect(run).resolves.toBe(3);
@@ -843,7 +891,7 @@ test('closing help resets the approval gate before y counts', async () => {
     stdin.emit('data', 'hello\r');
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(50);
-    expect(output(stdout)).toContain('Type into');
+    expect(output(stdout)).toContain('wants to type into');
     await vi.advanceTimersByTimeAsync(450);
 
     stdin.emit('data', '\x1bOP');

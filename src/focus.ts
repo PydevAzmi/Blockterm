@@ -236,7 +236,7 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
       } else if (isPrintable(ch)) {
         next = { ...insertInput(next, ch), inputShown: false };
       }
-    } else if (ch === 'y' && card.truncated !== true) {
+    } else if ((ch === 'y' || ch === '\r') && card.truncated !== true) {
       return decide(next, { kind: 'approve', keys: card.keys, allowRest: false });
     } else if (ch === 'a' && card.truncated !== true) {
       return decide(next, { kind: 'approve', keys: card.keys, allowRest: true });

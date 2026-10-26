@@ -46,7 +46,7 @@ import type { TerminalSession } from './term/session.js';
 
 const CONFIG_HINT = 'Run `blockterm setup` to choose a model';
 const APPROVAL_QUIET_MS = 400;
-const APPROVE_KEYS = new Set(['y', 'a', 'e']);
+const APPROVE_KEYS = new Set(['y', 'a', 'e', '\r']);
 const SELECTION_HINT = 'c copy · o output · r rerun · e explain · Esc back';
 
 export function cardTokens(keys: string): { kind: 'text' | 'key'; label: string }[] {
@@ -900,7 +900,7 @@ export async function runApp(o: {
 
       const keys = [...event.data];
       if (!keys.some(ch => APPROVE_KEYS.has(ch))) return false;
-      const approve = keys.some(ch => ch === 'y' || ch === 'a');
+      const approve = keys.some(ch => ch === 'y' || ch === 'a' || ch === '\r');
       const seenAt = approve ? cardVisibleAt : cardDrawnAt;
       if (seenAt === null) return true;
       return now - seenAt < APPROVAL_QUIET_MS || quiet < APPROVAL_QUIET_MS;

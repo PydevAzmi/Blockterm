@@ -24,12 +24,15 @@ export interface CardView {
 }
 
 const AMBER = '38;5;178';
-const AMBER_REVERSE = `${AMBER};7`;
+const CARD_HEADER = `1;${AMBER}`;
+const CARD_CHIP = `1;${AMBER};7`;
+const CARD_TEXT = '97';
 const DIM = '2';
 const ERROR = '31';
 const DEFAULT_COLOR = '36';
-const CARD_ACTIONS = 'y approve  e edit  n deny  a allow for this task';
 const CARD_NOTICE = 'too long to show — e to edit, n to deny, or widen the window';
+const CARD_EDIT_HINT = 'Enter approve · Esc deny';
+const CARD_DENY_HINT = 'Enter deny · Esc deny';
 
 export interface PanelDrawResult {
   cursor: { row: number; col: number } | null;
@@ -142,22 +145,51 @@ export function drawPanel(
     sgr: string;
   }
 
-  const cellsFor = (text: string, sgr: string): CardCell[][] => {
-    const rows: CardCell[][] = [[]];
-    let used = 0;
+  const textCells = (text: string, sgr: string): CardCell[] => {
+    const out: CardCell[] = [];
     for (const ch of Array.from(text)) {
       const w = charWidth(ch);
-      if (used + w > innerCols && used > 0) {
-        rows.push([]);
-        used = 0;
-      }
-      const row = rows[rows.length - 1]!;
-      row.push({ ch, width: w, sgr });
-      if (w === 2) row.push({ ch: '', width: 0, sgr });
-      used += w;
+      out.push({ ch, width: w, sgr });
+      if (w === 2) out.push({ ch: '', width: 0, sgr });
     }
+    return out;
+  };
+
+  const wrapCardContent = (cells: CardCell[], width: number, indent: number): CardCell[][] => {
+    const rows: CardCell[][] = [];
+    let row: CardCell[] = [];
+    let used = 0;
+    const start = (): void => {
+      row = [];
+      used = 0;
+      const pad = Math.min(indent, width);
+      for (let i = 0; i < pad; i += 1) row.push({ ch: ' ', width: 1, sgr: '' });
+      used = pad;
+    };
+    start();
+    for (const cell of cells) {
+      if (cell.width === 0) {
+        row.push(cell);
+        continue;
+      }
+      if (width > 0 && used + cell.width > width && used > indent) {
+        rows.push(row);
+        start();
+      }
+      row.push(cell);
+      used += cell.width;
+    }
+    rows.push(row);
     return rows;
   };
+
+  const gutter = (content: CardCell[]): CardCell[] => [
+    { ch: '▌', width: 1, sgr: AMBER },
+    { ch: ' ', width: 1, sgr: AMBER },
+    ...content,
+  ];
+
+  const blankCardRow = (): CardCell[] => gutter([]);
 
   const drawCells = (row: number, col: number, rowCells: CardCell[]): void => {
     let x = col;
@@ -199,45 +231,101 @@ export function drawPanel(
   const inputTop = inputRow - (inputLines.length - 1);
   const contentEnd = inputTop - 1;
 
+  const contentCols = Math.max(0, innerCols - 2);
+  let headerRows: CardCell[][] = [];
   let cardRows: CardCell[][] = [];
+  let compactRows: CardCell[][] = [];
   if (card !== null) {
-    cardRows = cellsFor(`Type into ${escapeControl(card.target)}`, AMBER);
-    const payload: CardCell[][] = [[]];
-    let used = 0;
+    headerRows = wrapCardContent(
+      [
+        ...textCells('wants to type into ', CARD_HEADER),
+        ...textCells(escapeControl(card.target), CARD_TEXT),
+      ],
+      contentCols,
+      0,
+    ).map(gutter);
+
+    const payloadCells: CardCell[] = [];
+    let previous: 'text' | 'key' | null = null;
     for (const token of card.tokens) {
-      if (used > 0) {
-        if (used + 1 > innerCols) {
-          payload.push([]);
-          used = 0;
-        }
-        const sep = payload[payload.length - 1]!;
-        sep.push({ ch: ' ', width: 1, sgr: AMBER });
-        used += 1;
+      if (previous === 'text' && token.kind === 'key') {
+        payloadCells.push({ ch: ' ', width: 1, sgr: AMBER });
       }
-      const text = token.kind === 'text' ? `"${token.label}"` : token.label;
-      const sgr = token.kind === 'key' ? AMBER_REVERSE : AMBER;
-      for (const ch of Array.from(text)) {
-        const w = charWidth(ch);
-        if (used + w > innerCols && used > 0) {
-          payload.push([]);
-          used = 0;
+      if (token.kind === 'text') {
+        const chars = Array.from(token.label);
+        let first = 0;
+        while (first < chars.length && chars[first] === ' ') first += 1;
+        let last = chars.length - 1;
+        while (last >= 0 && chars[last] === ' ') last -= 1;
+        for (let i = 0; i < chars.length; i += 1) {
+          const ch = chars[i]!;
+          const w = charWidth(ch);
+          const space = ch === ' ' && (i < first || i > last);
+          payloadCells.push({ ch: space ? '·' : ch, width: w, sgr: space ? DIM : CARD_TEXT });
+          if (w === 2) {
+            payloadCells.push({ ch: '', width: 0, sgr: space ? DIM : CARD_TEXT });
+          }
         }
-        const row = payload[payload.length - 1]!;
-        row.push({ ch, width: w, sgr });
-        if (w === 2) row.push({ ch: '', width: 0, sgr });
-        used += w;
+      } else {
+        payloadCells.push(...textCells(` ${token.label} `, CARD_CHIP));
       }
+      previous = token.kind;
     }
-    cardRows.push(...payload);
-    for (const line of wrapLine(CARD_ACTIONS, innerCols)) cardRows.push(...cellsFor(line, AMBER));
+    const payloadRows = wrapCardContent(payloadCells, contentCols, 2).map(gutter);
+
+    const bold = `1;${AMBER}`;
+    const actionGroups: CardCell[][] = [
+      [...textCells(' y ', CARD_CHIP), ...textCells(' approve (Enter)', CARD_TEXT)],
+      [...textCells('e', bold), ...textCells(' edit', DIM)],
+      [...textCells('n', bold), ...textCells(' deny', DIM)],
+      [...textCells('a', bold), ...textCells(' all', DIM)],
+    ];
+    const actionSeparators = [0, 3, 2, 2];
+    const actionRows: CardCell[][] = [];
+    let actionRow: CardCell[] = [];
+    let actionUsed = 0;
+    for (let i = 0; i < actionGroups.length; i += 1) {
+      const group = actionGroups[i]!;
+      const groupWidth = group.reduce((sum, cell) => sum + cell.width, 0);
+      const separator = actionSeparators[i]!;
+      if (actionUsed > 0 && actionUsed + separator + groupWidth > contentCols) {
+        actionRows.push(gutter(actionRow));
+        actionRow = [];
+        actionUsed = 0;
+      } else if (actionUsed > 0) {
+        for (let s = 0; s < separator; s += 1) {
+          actionRow.push({ ch: ' ', width: 1, sgr: '' });
+          actionUsed += 1;
+        }
+      }
+      actionRow.push(...group);
+      actionUsed += groupWidth;
+    }
+    actionRows.push(gutter(actionRow));
+
+    const editing = ui.card?.editing === true || ui.card?.denying === true;
+    const hint = ui.card?.denying === true ? CARD_DENY_HINT : CARD_EDIT_HINT;
+    const actionBlock = editing
+      ? wrapCardContent(textCells(hint, DIM), contentCols, 0).map(gutter)
+      : actionRows;
+
+    cardRows = [...headerRows, blankCardRow(), ...payloadRows, blankCardRow(), ...actionBlock];
+    compactRows = [...headerRows, ...payloadRows, ...actionBlock];
   }
 
   const cardBudget = Math.max(0, contentEnd - rect.row + 1);
-  const cardTruncated = card !== null && cardRows.length > cardBudget;
-  let cardShown = cardRows;
-  if (cardTruncated) {
-    const notice = wrapLine(CARD_NOTICE, innerCols).flatMap(line => cellsFor(line, AMBER));
-    cardShown = [cardRows[0]!, ...notice].slice(0, cardBudget);
+  let cardTruncated = false;
+  let cardShown: CardCell[][] = [];
+  if (card !== null) {
+    if (cardRows.length <= cardBudget) {
+      cardShown = cardRows;
+    } else if (compactRows.length <= cardBudget) {
+      cardShown = compactRows;
+    } else {
+      cardTruncated = true;
+      const noticeRows = wrapCardContent(textCells(CARD_NOTICE, AMBER), contentCols, 0).map(gutter);
+      cardShown = [headerRows[0]!, ...noticeRows].slice(0, cardBudget);
+    }
   }
   const cardHeight = card !== null ? cardShown.length : 0;
 
