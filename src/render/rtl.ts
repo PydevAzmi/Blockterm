@@ -61,7 +61,9 @@ define('\u0637', 'D', '\uFEC1', '\uFEC2', '\uFEC3', '\uFEC4');
 define('\u0638', 'D', '\uFEC5', '\uFEC6', '\uFEC7', '\uFEC8');
 define('\u0639', 'D', '\uFEC9', '\uFECA', '\uFECB', '\uFECC');
 define('\u063A', 'D', '\uFECD', '\uFECE', '\uFECF', '\uFED0');
+for (let cp = 0x063b; cp <= 0x063f; cp += 1) define(String.fromCodePoint(cp), 'D');
 define('\u0640', 'C');
+define('\u200D', 'C');
 define('\u0641', 'D', '\uFED1', '\uFED2', '\uFED3', '\uFED4');
 define('\u0642', 'D', '\uFED5', '\uFED6', '\uFED7', '\uFED8');
 define('\u0643', 'D', '\uFED9', '\uFEDA', '\uFEDB', '\uFEDC');
@@ -82,9 +84,20 @@ define('\u06CC', 'D', '\uFBFC', '\uFBFD', '\uFBFE', '\uFBFF');
 for (let cp = 0x064b; cp <= 0x065f; cp += 1) define(String.fromCodePoint(cp), 'T');
 define('\u0670', 'T');
 
+const TRANSPARENT: Shaping = { join: 'T', forms: [null, null, null, null] };
+const MARKS = /^\p{M}+$/u;
+
+function entryFor(ch: string): Shaping | undefined {
+  const first = Array.from(ch)[0];
+  if (first === undefined) return undefined;
+  const entry = SHAPING.get(first);
+  if (entry !== undefined) return entry;
+  return MARKS.test(ch) ? TRANSPARENT : undefined;
+}
+
 function previousJoiner(chars: readonly string[], index: number): Shaping | null {
   for (let i = index - 1; i >= 0; i -= 1) {
-    const entry = SHAPING.get(chars[i]!);
+    const entry = entryFor(chars[i]!);
     if (entry === undefined) return null;
     if (entry.join === 'T') continue;
     return entry;
@@ -94,7 +107,7 @@ function previousJoiner(chars: readonly string[], index: number): Shaping | null
 
 function nextJoiner(chars: readonly string[], index: number): Shaping | null {
   for (let i = index + 1; i < chars.length; i += 1) {
-    const entry = SHAPING.get(chars[i]!);
+    const entry = entryFor(chars[i]!);
     if (entry === undefined) return null;
     if (entry.join === 'T') continue;
     return entry;
@@ -114,7 +127,7 @@ function joinsRight(entry: Shaping): boolean {
 export function shapeArabic(chars: readonly string[]): string[] {
   const out = chars.slice();
   for (let i = 0; i < chars.length; i += 1) {
-    const entry = SHAPING.get(chars[i]!);
+    const entry = entryFor(chars[i]!);
     if (entry === undefined || entry.join === 'T' || entry.join === 'C') continue;
 
     const prev = previousJoiner(chars, i);
@@ -129,7 +142,10 @@ export function shapeArabic(chars: readonly string[]): string[] {
     else form = 0;
 
     const shaped = entry.forms[form] ?? entry.forms[0];
-    if (shaped !== null) out[i] = shaped;
+    if (shaped !== null) {
+      const codePoints = Array.from(chars[i]!);
+      out[i] = shaped + codePoints.slice(1).join('');
+    }
   }
   return out;
 }
@@ -153,7 +169,21 @@ interface Unit {
 
 function placeholder(ch: string): string {
   const first = Array.from(ch)[0];
-  return first !== undefined && isRtlClass(first) ? '\u05D0' : 'a';
+  if (first === undefined) return '!';
+  switch (bidi.getBidiCharTypeName(first)) {
+    case 'AL':
+      return '\u0627';
+    case 'R':
+      return '\u05D0';
+    case 'L':
+      return 'a';
+    case 'EN':
+      return '0';
+    case 'AN':
+      return '\u0660';
+    default:
+      return '!';
+  }
 }
 
 export function reorderSpan(
@@ -166,11 +196,18 @@ export function reorderSpan(
   logical: Map<number, LogicalRow>,
 ): boolean {
   if (frameCols <= 0 || row < 0 || col < 0 || col >= frameCols) return false;
-  const spanWidth = Math.min(width, frameCols - col);
-  if (spanWidth <= 0) return false;
+  if (width <= 0) return false;
 
   const rowStart = row * frameCols;
   if (rowStart + frameCols > cells.length) return false;
+
+  let spanWidth = Math.min(width, frameCols - col);
+  while (spanWidth > 0) {
+    const cell = cells[rowStart + col + spanWidth - 1]!;
+    if (cell.width !== 1 || cell.ch !== ' ') break;
+    spanWidth -= 1;
+  }
+  if (spanWidth <= 0) return false;
 
   let spanText = '';
   for (let i = col; i < col + spanWidth; i += 1) spanText += cells[rowStart + i]!.ch;

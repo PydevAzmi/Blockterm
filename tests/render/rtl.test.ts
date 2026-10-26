@@ -30,8 +30,24 @@ test('isolated letters and non-Arabic pass through', () => {
   expect(shapeArabic(Array.from('م a')).join('')).toBe('ﻡ a');
 });
 
+test('shapes a base letter with combining marks by its first code point', () => {
+  expect(shapeArabic(['ب', 'بَ', 'ب'])).toEqual(['\uFE91', '\uFE92\u064E', '\uFE90']);
+});
+
+test('a cell of only marks is transparent', () => {
+  expect(shapeArabic(['ب', '\u064E', 'ب'])).toEqual(['\uFE91', '\u064E', '\uFE90']);
+});
+
 test('lam-alef keeps two cells', () => {
-  expect(shapeArabic(Array.from('لا'))).toHaveLength(2);
+  expect(shapeArabic(Array.from('لا'))).toEqual(['\uFEDF', '\uFE8E']);
+});
+
+test('ZWJ joins like tatweel without taking a form', () => {
+  expect(shapeArabic(['ب', '\u200D', 'ب'])).toEqual(['\uFE91', '\u200D', '\uFE90']);
+});
+
+test('063B-063F join neighbours without taking forms', () => {
+  expect(shapeArabic(['ب', '\u063B', 'ب'])).toEqual(['\uFE91', '\u063B', '\uFE90']);
 });
 
 test('a pure Arabic span is shaped and reversed, same cell count', () => {
@@ -41,6 +57,32 @@ test('a pure Arabic span is shaped and reversed, same cell count', () => {
   expect(textOf(cells)).toBe('ﺎﺒﺣﺮﻣ');
   expect(logical.get(0)!.map).toEqual([4, 3, 2, 1, 0]);
   expect(textOf(logical.get(0)!.cells)).toBe('مرحبا');
+});
+
+test('trailing blanks stay left-anchored under an RTL base', () => {
+  const cells = rowOf('مرحبا   ');
+  const logical = new Map<number, LogicalRow>();
+  reorderSpan(cells, 8, 0, 0, 8, 'auto', logical);
+  expect(textOf(cells)).toBe('ﺎﺒﺣﺮﻣ   ');
+  expect(logical.get(0)!.map).toEqual([4, 3, 2, 1, 0, 5, 6, 7]);
+});
+
+test('trailing blanks after mixed text stay at the end', () => {
+  const cells = rowOf('مرحبا hi   ');
+  reorderSpan(cells, 11, 0, 0, 11, 'auto', new Map());
+  expect(textOf(cells)).toBe('hi ﺎﺒﺣﺮﻣ   ');
+});
+
+test('multi-code-unit cells use a same-class BMP placeholder for bidi', () => {
+  const cells = rowOf('مر 😀 حب');
+  reorderSpan(cells, cells.length, 0, 0, cells.length, 'auto', new Map());
+  expect(textOf(cells)).toBe('ﺐﺣ 😀 ﺮﻣ');
+});
+
+test('astral digits use the EN placeholder class for bidi', () => {
+  const cells = rowOf('م 𝟙 1');
+  reorderSpan(cells, cells.length, 0, 0, cells.length, 'auto', new Map());
+  expect(textOf(cells)).toBe('1 𝟙 ﻡ');
 });
 
 test('LTR base keeps echo and digits in place', () => {
