@@ -223,3 +223,17 @@ test('returns no cursor when the terminal has focus', () => {
   const result = drawPanel(cs, FRAME_COLS, RECT, ui({ focus: 'terminal' }), [], null);
   expect(result.cursor).toBeNull();
 });
+
+test('the cursor sits at ui.cursor, after a wide character', () => {
+  const cs = blank();
+  const r = drawPanel(cs, FRAME_COLS, RECT, ui({ input: '世ab', cursor: 1 }), [], null);
+  const promptWidth = '(agent) ❯ '.length;
+  expect(r.cursor).toEqual({ row: INPUT_ROW, col: promptWidth + 2 });
+});
+
+test('cursor at the start of a long wrapped input stays on a visible row', () => {
+  const cs = blank();
+  const r = drawPanel(cs, FRAME_COLS, RECT, ui({ input: 'x'.repeat(500), cursor: 0 }), [], null);
+  expect(r.cursor!.row).toBeGreaterThanOrEqual(RECT.row);
+  expect(r.cursor!.row).toBeLessThanOrEqual(INPUT_ROW);
+});

@@ -77,6 +77,29 @@ function wrapLine(text: string, width: number): string[] {
   return lines;
 }
 
+function wrappedPosition(chars: string[], at: number, width: number): { line: number; col: number } {
+  if (width <= 0) return { line: 0, col: 0 };
+  const index = Math.max(0, Math.min(at, chars.length));
+  let line = 0;
+  let col = 0;
+  for (let i = 0; i < index; i += 1) {
+    const w = charWidth(chars[i]!);
+    if (col + w > width && col > 0) {
+      line += 1;
+      col = 0;
+    }
+    col += w;
+  }
+  if (index < chars.length) {
+    const w = charWidth(chars[index]!);
+    if (col + w > width && col > 0) {
+      line += 1;
+      col = 0;
+    }
+  }
+  return { line, col };
+}
+
 export function drawPanel(
   cells: Cell[],
   frameCols: number,
@@ -157,12 +180,22 @@ export function drawPanel(
     Math.max(0, innerCols - 1),
   );
   const inputWrapWidth = Math.max(1, innerCols - promptWidth);
-  const allInputLines = wrapLine(escapeControl(ui.input), inputWrapWidth);
+  const inputPoints = Array.from(ui.input);
+  const cursorIndex = Math.max(0, Math.min(ui.cursor ?? inputPoints.length, inputPoints.length));
+  const escapedInput = inputPoints.map(ch => escapeControl(ch)).join('');
+  const escapedPoints = Array.from(escapedInput);
+  const escapedCursorIndex = Array.from(
+    inputPoints.slice(0, cursorIndex).map(ch => escapeControl(ch)).join(''),
+  ).length;
+  const cursorPosition = wrappedPosition(escapedPoints, escapedCursorIndex, inputWrapWidth);
+  const allInputLines = wrapLine(escapedInput, inputWrapWidth);
   const maxInputRows = Math.max(1, rect.rows);
   const inputTruncated = allInputLines.length > maxInputRows;
-  const inputLines = inputTruncated
-    ? allInputLines.slice(allInputLines.length - maxInputRows)
-    : allInputLines;
+  const inputStart = Math.min(
+    Math.max(0, allInputLines.length - maxInputRows),
+    cursorPosition.line,
+  );
+  const inputLines = allInputLines.slice(inputStart, inputStart + maxInputRows);
   const inputTop = inputRow - (inputLines.length - 1);
   const contentEnd = inputTop - 1;
 
@@ -256,6 +289,11 @@ export function drawPanel(
     writeRun(inputRow, innerCol + innerCols - statusWidth, status, '33', statusWidth);
   }
 
-  const cursor = focused ? { row: inputRow, col: endX } : null;
+  const cursor = focused
+    ? {
+        row: inputTop + (cursorPosition.line - inputStart),
+        col: innerCol + promptWidth + cursorPosition.col,
+      }
+    : null;
   return { cursor, cardTruncated, inputTruncated, scroll };
 }
