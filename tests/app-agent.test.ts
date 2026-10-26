@@ -63,6 +63,20 @@ function sendKeysModel(keys: string): MockLanguageModelV4 {
   });
 }
 
+function sendKeysAfter(gate: Promise<void>): MockLanguageModelV4 {
+  let n = 0;
+  return new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      if (n === 1) {
+        await gate;
+        return callStream('c1', 'send_keys', { keys: 'echo hi<Enter>' });
+      }
+      return textStream('done');
+    },
+  });
+}
+
 const CONFIG: Config = {
   provider: '@ai-sdk/anthropic',
   model: 'claude-haiku-5-5',
@@ -376,6 +390,101 @@ test('type-ahead right after a card does not approve unseen keys', async () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+test('a draft is cleared when the card appears and enter still approves', async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const model = sendKeysAfter(gate);
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'go\r');
+  await until(() => model.doStreamCalls.length >= 1);
+  stdin.emit('data', 'hello');
+  await wait(20);
+  release();
+  await until(() => output(stdout).includes('wants to type into'));
+  expect(output(stdout)).not.toContain('hello');
+  await wait(450);
+  stdin.emit('data', '\r');
+  await until(() => pty.written.some(w => String(w).includes('echo hi\r')));
+  expect(pty.written.map(String).join('')).toContain('echo hi\r');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('enter does not approve after a printable key was ignored', async () => {
+  const model = sendKeysThenDone();
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('wants to type into'));
+  stdin.emit('data', 'x');
+  await wait(20);
+  await wait(450);
+  stdin.emit('data', '\r');
+  await wait(100);
+  expect(output(stdout)).toContain('wants to type into');
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('y still approves a card while a draft is already in the input', async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const model = sendKeysAfter(gate);
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'go\r');
+  await until(() => model.doStreamCalls.length >= 1);
+  stdin.emit('data', 'hello');
+  await wait(20);
+  release();
+  await until(() => output(stdout).includes('wants to type into'));
+  await wait(450);
+  stdin.emit('data', 'y');
+  await until(() => pty.written.some(w => String(w).includes('echo hi\r')));
+  expect(pty.written.map(String).join('')).toContain('echo hi\r');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('escape that clears a mouse highlight still resets the quiet window', async () => {
+  const model = sendKeysThenDone();
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model) });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('wants to type into'));
+  await wait(450);
+
+  stdin.emit('data', '\x1b[<0;2;2M');
+  stdin.emit('data', '\x1b[<32;6;2M');
+  await wait(20);
+  stdin.emit('data', '\x1b');
+  await wait(20);
+  stdin.emit('data', '\r');
+  await wait(100);
+  expect(output(stdout)).toContain('wants to type into');
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
 });
 
 test('an edited card is approved once the field is drawn and quiet', async () => {

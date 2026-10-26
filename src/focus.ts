@@ -19,6 +19,7 @@ export interface PanelUi {
     editing: boolean;
     denying: boolean;
     truncated?: boolean;
+    ignored?: boolean;
   };
 }
 
@@ -236,7 +237,10 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
       } else if (isPrintable(ch)) {
         next = { ...insertInput(next, ch), inputShown: false };
       }
-    } else if ((ch === 'y' || ch === '\r') && card.truncated !== true) {
+    } else if (
+      (ch === 'y' || (ch === '\r' && next.input === '' && card.ignored !== true)) &&
+      card.truncated !== true
+    ) {
       return decide(next, { kind: 'approve', keys: card.keys, allowRest: false });
     } else if (ch === 'a' && card.truncated !== true) {
       return decide(next, { kind: 'approve', keys: card.keys, allowRest: true });
@@ -254,6 +258,8 @@ function cardBytes(ui: PanelUi, data: string): { ui: PanelUi; actions: Action[] 
         inputShown: false,
         card: { ...card, editing: true },
       };
+    } else if (isPrintable(ch)) {
+      next = { ...next, card: { ...card, ignored: true } };
     }
   }
   return { ui: next, actions: [] };
