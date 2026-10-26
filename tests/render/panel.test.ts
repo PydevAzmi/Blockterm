@@ -200,13 +200,19 @@ test('a long card payload wraps across rows without dropping characters', () => 
   const parsed = parseKeys('git commit -am "a fairly long commit message here"<Enter>');
   const tokens = parsed.ok ? displayTokens(parsed.tokens) : [];
   drawPanel(cs, FRAME_COLS, rect, ui({ model: 'm' }), [], { target: 'shell', tokens });
-  const all = Array.from({ length: rect.rows }, (_, i) =>
+  const rows = Array.from({ length: rect.rows }, (_, i) =>
     rowText(cs, rect.row + i).slice(rect.col, rect.col + rect.cols),
-  ).join('\n');
-  expect(all.replace(/[▌\s]/g, '')).toContain(
-    'gitcommit-am"afairlylongcommitmessagehere"',
   );
-  expect(all).toContain('⏎ Enter');
+  const header = rows.findIndex(row => row.includes('wants to type into'));
+  const payload: string[] = [];
+  for (let i = header + 2; i < rows.length; i += 1) {
+    const content = rows[i]!.slice(4).replace(/ +$/, '');
+    if (content === '') break;
+    payload.push(content);
+  }
+  expect(payload.join('')).toBe(
+    'git commit -am "a fairly long commit message here"  ⏎ Enter',
+  );
 });
 
 test('an oversized card is reported truncated and shows the edit/deny hint', () => {

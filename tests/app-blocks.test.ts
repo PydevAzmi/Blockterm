@@ -345,6 +345,22 @@ test('the wheel in a raw shell view sends arrows to the pty', async () => {
   await expect(run).resolves.toBe(0);
 });
 
+test('the wheel over the shell sends no arrows while the panel has focus', async () => {
+  const { run, pty, stdin, stdout } = startApp();
+
+  pty.emit('\x1b[?1049h');
+  await wait(30);
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+
+  stdin.emit('data', '\x1b[<64;5;5M');
+  await wait(50);
+  expect(pty.written).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
 test('the wheel over the agent strip scrolls the transcript, not the blocks', async () => {
   const model = new MockLanguageModelV4({
     doGenerate: async () => reply(Array.from({ length: 12 }, (_, i) => `R${String(i).padStart(2, '0')}`).join('\n')),
@@ -864,6 +880,35 @@ test('r at a non-idle prompt writes nothing and shows the notice', async () => {
   await expect(run).resolves.toBe(0);
 });
 
+test('a selection notice does not hide an approval pending status', async () => {
+  const model = sendKeysThenDone();
+  const { run, pty, stdin, stdout } = startApp({ model: okModel(model) });
+
+  pty.emit(cycle('a'));
+  await until(() => output(stdout).includes('$ ls ─'));
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('wants to type into'));
+
+  pty.emit('\x1b]133;A\x07$ \x1b]133;B\x07sleep\r\n\x1b]133;C\x07');
+  await wait(30);
+
+  stdin.emit('data', '\x0b');
+  await wait(20);
+  stdin.emit('data', '\x1b[1;5A');
+  await wait(30);
+  stdin.emit('data', 'r');
+  await wait(50);
+  expect(pty.written).toEqual([]);
+  expect(output(stdout)).toContain('approval pending (ctrl+k)');
+  expect(output(stdout)).not.toContain('not at an idle prompt');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
 test('Enter and Esc leave selection without writing, a second Esc reaches the pty', async () => {
   const { run, pty, stdin, stdout } = startApp();
 
@@ -1038,7 +1083,7 @@ test('a drag in the shell copies the selected text and shows the footer notice',
   await expect(run).resolves.toBe(0);
 });
 
-test('a press and release on the same cell does not copy', async () => {
+test('a press and release on the same cell does not copy or leave a selection', async () => {
   const copied: string[] = [];
   const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
 
@@ -1049,6 +1094,18 @@ test('a press and release on the same cell does not copy', async () => {
   stdin.emit('data', '\x1b[<0;2;2m');
   await wait(50);
   expect(copied).toEqual([]);
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+
+  const beforeClick = stdout.writes.join('').length;
+  stdin.emit('data', '\x1b[<0;2;2M');
+  stdin.emit('data', '\x1b[<0;2;2m');
+  await wait(50);
+  expect(stdout.writes.join('').slice(beforeClick)).not.toContain('\x1b[0;7m');
+
+  stdin.emit('data', '\x1b');
+  await until(() => !output(stdout).includes('agent · claude-haiku-5-5'));
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);

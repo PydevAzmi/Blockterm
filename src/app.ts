@@ -185,7 +185,7 @@ export async function runApp(o: {
       const trackedModes = tracked.get();
       const status = statusText();
       const footerStatus =
-        selectionNotice !== null
+        selectionNotice !== null && (status === '' || status === 'agent busy')
           ? selectionNotice
           : status !== ''
             ? status
@@ -594,6 +594,7 @@ export async function runApp(o: {
                   editing: false,
                   denying: false,
                   truncated: true,
+                  ignored: false,
                 },
               };
               requestRender();
@@ -909,7 +910,10 @@ export async function runApp(o: {
 
       const keys = [...event.data];
       if (!keys.some(ch => APPROVE_KEYS.has(ch))) return false;
-      const approve = keys.some(ch => ch === 'y' || ch === 'a' || ch === '\r');
+      const enterApproves = ui.input === '' && c.ignored !== true;
+      const approve = keys.some(
+        ch => ch === 'y' || ch === 'a' || (ch === '\r' && enterApproves),
+      );
       const seenAt = approve ? cardVisibleAt : cardDrawnAt;
       if (seenAt === null) return true;
       return now - seenAt < APPROVAL_QUIET_MS || quiet < APPROVAL_QUIET_MS;
@@ -933,6 +937,8 @@ export async function runApp(o: {
       if (step !== 0) {
         if (session.view === 'blocks' && store.integrated) {
           scrollBy(step);
+        } else if (ui.focus === 'panel') {
+          return true;
         } else {
           const app = session.mirror.modes.applicationCursorKeysMode;
           const arrow =
@@ -994,7 +1000,7 @@ export async function runApp(o: {
             return;
           } else if (event.action === 'release' && dragging && mouseSel !== null) {
             const sel = extendSelection(mouseSel, layout, at);
-            mouseSel = sel;
+            mouseSel = sel.moved ? sel : null;
             dragging = false;
             if (sel.moved && lastFrame !== null) {
               const text = selectedText(lastFrame, sel);
@@ -1019,7 +1025,10 @@ export async function runApp(o: {
         mouseSel = null;
         dragging = false;
         requestRender();
-        if (event.type === 'bytes' && event.data === '\x1b') return;
+        if (event.type === 'bytes' && event.data === '\x1b') {
+          lastKeyAt = Date.now();
+          return;
+        }
       }
       const now = Date.now();
       const quiet = now - lastKeyAt;
