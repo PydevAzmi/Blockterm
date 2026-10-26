@@ -1,6 +1,6 @@
 {
   "name": "blockterm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "An open-source terminal with command blocks and an AI agent that types only what you approve.",
   "type": "module",
   "engines": {
