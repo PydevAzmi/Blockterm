@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test } from 'vitest';
-import { MockLanguageModelV4 } from 'ai/test';
+import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test';
 
 import type { Config, LoadResult } from '../src/config.js';
 import type { ModelResult } from '../src/agent/model.js';
@@ -160,6 +160,42 @@ function okModel(model: MockLanguageModelV4): (config: Config) => ModelResult {
   return () => ({ ok: true, model, label: CONFIG.model });
 }
 
+function textStream(text: string) {
+  return {
+    stream: convertArrayToReadableStream([
+      { type: 'text-start', id: 't' },
+      { type: 'text-delta', id: 't', delta: text },
+      { type: 'text-end', id: 't' },
+      { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage: USAGE },
+    ]),
+  };
+}
+
+function callStream(id: string, name: string, input: unknown) {
+  const json = JSON.stringify(input);
+  return {
+    stream: convertArrayToReadableStream([
+      { type: 'tool-input-start', id, toolName: name },
+      { type: 'tool-input-delta', id, delta: json },
+      { type: 'tool-input-end', id },
+      { type: 'tool-call', toolCallId: id, toolName: name, input: json },
+      { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage: USAGE },
+    ]),
+  };
+}
+
+function sendKeysThenDone(): MockLanguageModelV4 {
+  let n = 0;
+  return new MockLanguageModelV4({
+    doStream: async () => {
+      n += 1;
+      return n === 1
+        ? callStream('c1', 'send_keys', { keys: 'echo hi<Enter>' })
+        : textStream('done');
+    },
+  });
+}
+
 function failedCycle(body = 'boom', command = 'npm test'): string {
   const prompt = '\x1b]133;A\x07$ \x1b]133;B\x07';
   return (
@@ -257,7 +293,7 @@ test('the wheel scrolls the blocks and never reaches the pty', async () => {
   for (let i = 0; i < 4; i += 1) stdin.emit('data', '\x1b[<64;5;5M');
   await until(() => output(stdout).includes('$ ls ─'));
   expect(pty.written).toEqual([]);
-  expect(stdout.writes.join('')).toContain('\x1b[?1000h');
+  expect(stdout.writes.join('')).toContain('\x1b[?1002h');
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);
@@ -935,5 +971,157 @@ test('ctrl+arrows pass through without integration, in fullscreen and with no bl
   expect(empty.pty.written).toEqual(['\x1b[1;5A']);
   empty.pty.exit(0);
   await expect(empty.run).resolves.toBe(0);
+});
+
+test('a drag in the shell copies the selected text and shows the footer notice', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
+
+  pty.emit('hello');
+  await until(() => output(stdout).includes('hello'));
+
+  stdin.emit('data', '\x1b[<0;1;1M');
+  stdin.emit('data', '\x1b[<32;5;1M');
+  stdin.emit('data', '\x1b[<0;5;1m');
+
+  await until(() => copied.length === 1);
+  expect(copied).toEqual(['hello']);
+  await until(() => output(stdout).includes('copied 5 chars'));
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('a press and release on the same cell does not copy', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
+
+  pty.emit('hello');
+  await until(() => output(stdout).includes('hello'));
+
+  stdin.emit('data', '\x1b[<0;2;2M');
+  stdin.emit('data', '\x1b[<0;2;2m');
+  await wait(50);
+  expect(copied).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('a drag reaches the pty when the program asked for the mouse, and the agent strip still copies', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
+
+  pty.emit('hello');
+  await until(() => output(stdout).includes('hello'));
+  pty.emit('\x1b[?1000h\x1b[?1006h');
+  await wait(30);
+
+  stdin.emit('data', '\x1b[<0;1;1M');
+  stdin.emit('data', '\x1b[<32;5;1M');
+  stdin.emit('data', '\x1b[<0;5;1m');
+  await until(() => pty.written.length >= 2);
+  expect(pty.written.map(String).join('')).toContain('\x1b[<0;1;1M');
+  expect(copied).toEqual([]);
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+
+  stdin.emit('data', '\x1b[<0;1;24M');
+  stdin.emit('data', '\x1b[<32;10;24M');
+  stdin.emit('data', '\x1b[<0;10;24m');
+  await until(() => copied.length === 1);
+  expect(copied[0]).toContain('(agent');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('a release outside the pane copies the clamped text', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
+
+  pty.emit('hello');
+  await until(() => output(stdout).includes('hello'));
+
+  stdin.emit('data', '\x1b[<0;1;1M');
+  stdin.emit('data', '\x1b[<32;200;40M');
+  stdin.emit('data', '\x1b[<0;200;40m');
+
+  await until(() => copied.length === 1);
+  expect(copied[0]!.startsWith('hello')).toBe(true);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('a layout change mid-drag clears the selection so the release does not copy', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
+
+  pty.emit('hello');
+  await until(() => output(stdout).includes('hello'));
+
+  stdin.emit('data', '\x1b[<0;1;1M');
+  stdin.emit('data', '\x1b[<32;5;1M');
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+
+  stdin.emit('data', '\x1b[<0;5;1m');
+  await wait(50);
+  expect(copied).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('esc clears a selection over the card, and a second esc denies it', async () => {
+  const model = sendKeysThenDone();
+  const { run, pty, stdin, stdout } = startApp({
+    load: () => LOADED,
+    model: okModel(model),
+    copy: () => {},
+  });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('wants to type into'));
+  await wait(450);
+
+  stdin.emit('data', '\x1b[<0;1;19M');
+  stdin.emit('data', '\x1b[<32;10;19M');
+  stdin.emit('data', '\x1b[<0;10;19m');
+  await wait(50);
+
+  stdin.emit('data', '\x1b');
+  await wait(50);
+  expect(output(stdout)).toContain('wants to type into');
+
+  stdin.emit('data', '\x1b');
+  await until(() => !output(stdout).includes('wants to type into'));
+  expect(pty.written.map(String).join('')).not.toContain('echo hi');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('a drag does not copy while help is open', async () => {
+  const copied: string[] = [];
+  const { run, pty, stdin, stdout } = startApp({ copy: text => copied.push(text) });
+
+  pty.emit('hello');
+  await until(() => output(stdout).includes('hello'));
+  stdin.emit('data', '\x1bOP');
+  await until(() => output(stdout).includes('blockterm keys'));
+
+  stdin.emit('data', '\x1b[<0;1;1M');
+  stdin.emit('data', '\x1b[<32;5;1M');
+  stdin.emit('data', '\x1b[<0;5;1m');
+  await wait(50);
+  expect(copied).toEqual([]);
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
 });
 

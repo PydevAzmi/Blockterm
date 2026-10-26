@@ -26,6 +26,14 @@ import { InputTokenizer } from './input/tokenize.js';
 import { routeToPty } from './input/route.js';
 import { computeLayout } from './layout.js';
 import type { Size } from './layout.js';
+import {
+  extendSelection,
+  highlight,
+  paneAt,
+  selectedText,
+  startSelection,
+} from './mouse-select.js';
+import type { MouseSelection } from './mouse-select.js';
 import { renderDiff } from './render/diff.js';
 import { FOOTER, composeFrame } from './render/frame.js';
 import type { Frame } from './render/frame.js';
@@ -141,6 +149,7 @@ export async function runApp(o: {
     let newOutput = false;
     let lastDocHeight = 0;
     let selected: number | null = null;
+    let mouseSel: MouseSelection | null = null;
     let revealSelected = false;
     let selectionNotice: string | null = null;
     let selectionNoticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -288,17 +297,14 @@ export async function runApp(o: {
         }
         if (ui.inputShown !== false) ui = { ...ui, inputShown: false };
       }
+      if (mouseSel !== null && ui.help !== true) highlight(frame, mouseSel);
       if (ui.help === true) {
         drawHelp(frame.cells, frame.cols, frame.rows);
         frame.cursor = { ...frame.cursor, visible: false };
         cardVisibleAt = null;
         inputVisibleAt = null;
       }
-      const hostModes = hostModesFrom(
-        session.mirror,
-        trackedModes,
-        (session.view === 'blocks' && store.integrated) || layout.panel.rect !== null,
-      );
+      const hostModes = hostModesFrom(session.mirror, trackedModes);
       const out = hostModeDiff(lastHostModes, hostModes) + renderDiff(lastFrame, frame);
       if (out !== '') stdout.write(out);
       lastHostModes = hostModes;
@@ -420,6 +426,7 @@ export async function runApp(o: {
     };
 
     const applyLayout = (): void => {
+      mouseSel = null;
       const next = computeLayout({ cols: stdout.columns, rows: stdout.rows }, ui.open);
       const sizeChanged = next.pty.cols !== layout.pty.cols || next.pty.rows !== layout.pty.rows;
       layout = next;
@@ -941,13 +948,58 @@ export async function runApp(o: {
       }
       if (event.type === 'help-key') {
         lastKeyAt = Date.now();
+        mouseSel = null;
         const result = reduce(ui, event);
         ui = result.ui;
         for (const action of result.actions) runAction(action);
         requestRender();
         return;
       }
-      if (event.type === 'mouse' && wheelEvent(event)) return;
+      if (event.type === 'mouse') {
+        // The wheel scrolls, as before. Left drags belong to blockterm in the agent strip and,
+        // when the inner program did not ask for the mouse, in the shell.
+        if ((event.button & 64) === 0) {
+          const left = (event.button & 3) === 0;
+          const moving = (event.button & 32) !== 0;
+          const at = { row: event.row, col: event.col };
+          if (event.action === 'press' && left && !moving) {
+            const pane = paneAt(layout, event.row);
+            if (!(pane === 'shell' && session.mirror.modes.mouseTrackingMode !== 'none')) {
+              mouseSel = startSelection(layout, at);
+              requestRender();
+              return;
+            }
+          } else if (event.action === 'motion' && left && mouseSel !== null) {
+            mouseSel = extendSelection(mouseSel, layout, at);
+            requestRender();
+            return;
+          } else if (event.action === 'release' && mouseSel !== null) {
+            const sel = extendSelection(mouseSel, layout, at);
+            mouseSel = sel;
+            if (sel.moved && lastFrame !== null) {
+              const text = selectedText(lastFrame, sel);
+              if (text !== '') {
+                copy(text);
+                showSelectionNotice(`copied ${Array.from(text).length} chars`, 2000);
+              }
+            }
+            requestRender();
+            return;
+          }
+        }
+        if (wheelEvent(event)) return;
+      }
+      if (
+        mouseSel !== null &&
+        (event.type === 'bytes' ||
+          event.type === 'paste' ||
+          event.type === 'page-key' ||
+          event.type === 'agent-key')
+      ) {
+        mouseSel = null;
+        requestRender();
+        if (event.type === 'bytes' && event.data === '\x1b') return;
+      }
       const now = Date.now();
       const quiet = now - lastKeyAt;
       if (blocksApprove(event, now, quiet)) {
