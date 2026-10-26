@@ -183,6 +183,7 @@ function startApp(o: {
   model?: (c: Config, sessionId?: string) => ModelResult;
   cols?: number;
   rows?: number;
+  rtl?: boolean;
 }): { run: Promise<number>; pty: FakePty; stdin: FakeStdin; stdout: FakeStdout } {
   const pty = new FakePty();
   const stdin = new FakeStdin();
@@ -194,6 +195,7 @@ function startApp(o: {
     createSession: (_shell, size) => new TerminalSession(pty, size),
     loadConfig: o.load,
     modelFactory: o.model,
+    ...(o.rtl !== undefined ? { rtl: o.rtl } : {}),
   });
   return { run, pty, stdin, stdout };
 }
@@ -258,6 +260,23 @@ test('approving the card types the keys into the pty', async () => {
   stdin.emit('data', 'y');
   await until(() => pty.written.some(w => String(w).includes('echo hi\r')));
   expect(pty.written.map(String).join('')).toContain('echo hi\r');
+
+  pty.exit(0);
+  await expect(run).resolves.toBe(0);
+});
+
+test('an approved Arabic card types the logical keys into the pty', async () => {
+  const model = sendKeysModel('مرحبا<Enter>');
+  const { run, pty, stdin, stdout } = startApp({ load: () => LOADED, model: okModel(model), rtl: true });
+
+  stdin.emit('data', '\x0b');
+  await until(() => output(stdout).includes('agent · claude-haiku-5-5'));
+  stdin.emit('data', 'hello\r');
+  await until(() => output(stdout).includes('wants to type into'));
+  await wait(450);
+  stdin.emit('data', 'y');
+  await until(() => pty.written.some(w => String(w).includes('مرحبا\r')));
+  expect(pty.written.map(String).join('')).toContain('مرحبا\r');
 
   pty.exit(0);
   await expect(run).resolves.toBe(0);

@@ -263,9 +263,17 @@ export async function runApp(o: {
           frame.cells,
           frame.cols,
           layout.panel.rect,
-          { ...ui, model: modelLabel, color: agentColor, status: footerStatus, scroll: agentScroll },
+          {
+            ...ui,
+            rtl,
+            model: modelLabel,
+            color: agentColor,
+            status: footerStatus,
+            scroll: agentScroll,
+          },
           transcript,
           card,
+          frame.logical,
         );
         agentScroll = panel.scroll;
         if (card !== null) {

@@ -177,7 +177,7 @@ The agent can also run a command at an idle prompt (`run_command`), list recent 
 
 ### Agent line
 
-`ctrl+k` turns the mode line into the agent's input, labelled with the mode in parentheses: `(agent · your-model) ❯`. A few rows above it show the conversation (scroll it with the wheel); the agent's replies are short and drawn in `agentColor`. `ctrl+k` again returns focus to the shell; `Esc` closes the line (or cancels a running task). Type `/clear` or press `ctrl+l` in the agent line to start a fresh chat without restarting blockterm.
+`ctrl+k` turns the mode line into the agent's input, labelled with the mode in parentheses: `(agent · your-model) ❯`. A few rows above it show the conversation (scroll it with the wheel); the agent's replies are short and drawn in `agentColor`. Arabic and other RTL text in the transcript, input line and approval card is drawn joined and right to left on hosts without their own bidi support (setting `rtl`). `ctrl+k` again returns focus to the shell; `Esc` closes the line (or cancels a running task). Type `/clear` or press `ctrl+l` in the agent line to start a fresh chat without restarting blockterm.
 
 ### Privacy
 
