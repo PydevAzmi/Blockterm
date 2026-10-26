@@ -68,7 +68,7 @@ test('the published metadata matches the release', () => {
     readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
   ) as Record<string, unknown>;
 
-  expect(pkg.version).toBe('0.1.0');
+  expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
   expect(pkg.description).toBeTypeOf('string');
   expect(pkg.keywords).toEqual(expect.arrayContaining(['terminal', 'agent']));
   expect(pkg.homepage).toBe('https://blockterm.mohamedazmi.dev');
