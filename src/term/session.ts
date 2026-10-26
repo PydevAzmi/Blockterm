@@ -48,6 +48,7 @@ export class TerminalSession {
   constructor(
     private readonly pty: PtyLike,
     size: Size,
+    private readonly fixedProgram?: string,
   ) {
     this.mirror = new Terminal({
       allowProposedApi: true,
@@ -86,7 +87,7 @@ export class TerminalSession {
   }
 
   get program(): string {
-    return this.pty.process;
+    return this.fixedProgram ?? this.pty.process;
   }
 
   onParsed(cb: () => void): IDisposable {
@@ -165,5 +166,11 @@ export function spawnSession(
     encoding: process.platform === 'win32' ? null : 'utf8',
   });
 
-  return new TerminalSession(pty, size);
+  // node-pty on Windows can't see the foreground program and reports `name` (the TERM value)
+  // instead, so name the shell. ponytail: inside ssh on Windows the card still says the shell.
+  return new TerminalSession(pty, size, process.platform === 'win32' ? shellName(shell.file) : undefined);
+}
+
+export function shellName(file: string): string {
+  return file.split(/[\\/]/).pop()!.replace(/\.exe$/i, '');
 }

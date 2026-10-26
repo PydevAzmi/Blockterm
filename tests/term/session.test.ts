@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { expect, test } from 'vitest';
 
-import { TerminalSession, ensureExecutable, type View } from '../../src/term/session.js';
+import { TerminalSession, ensureExecutable, shellName, type View } from '../../src/term/session.js';
 import { FakePty } from '../helpers/fake-pty.js';
 
 function make(): { session: TerminalSession; pty: FakePty } {
@@ -131,6 +131,18 @@ test('resize hits pty and mirror', () => {
 test('program reports the pty process name', () => {
   const { session } = make();
   expect(session.program).toBe('fake-shell');
+});
+
+// node-pty on Windows reports the spawn `name` (the TERM value), not a program.
+test('a fixed program name wins over the pty process name', () => {
+  const session = new TerminalSession(new FakePty(), { cols: 80, rows: 24 }, 'pwsh');
+  expect(session.program).toBe('pwsh');
+});
+
+test('shellName drops the folder and .exe', () => {
+  expect(shellName('C:\\Program Files\\PowerShell\\7\\pwsh.exe')).toBe('pwsh');
+  expect(shellName('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.EXE')).toBe('powershell');
+  expect(shellName('/bin/zsh')).toBe('zsh');
 });
 
 test('kill kills the pty', () => {

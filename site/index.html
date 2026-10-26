@@ -103,14 +103,17 @@
   .msg .who { display: block; color: var(--screen-dim); }
   .tool { color: var(--screen-dim); border-left: 2px solid var(--slate-line); padding-left: 10px; }
   .card {
-    background: #2a2516; border: 1px solid var(--amber); border-radius: 6px; padding: 12px;
+    border-left: 3px solid var(--amber); padding: 2px 0 2px 12px;
     animation: arrive 0.5s ease-out 1.2s both;
   }
-  .card .where { color: var(--amber); margin: 0 0 8px; }
-  .card .payload { margin: 0 0 10px; color: #fff; }
-  .card .payload .key { background: var(--amber); color: var(--slate); padding: 0 5px; border-radius: 3px; }
+  .card .where { color: var(--amber); font-weight: 700; margin: 0 0 8px; }
+  .card .where span { color: #fff; font-weight: 400; }
+  .card .payload { margin: 0 0 10px 2ch; color: #fff; }
+  .card .payload .key { background: var(--amber); color: var(--slate); font-weight: 700; padding: 0 5px; margin-left: 1ch; border-radius: 3px; }
   .card .keys { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--screen-dim); margin: 0; padding: 0; list-style: none; }
-  .card .keys b { color: var(--screen-text); font-weight: 500; }
+  .card .keys b { color: var(--amber); font-weight: 700; }
+  .card .keys .default b { background: var(--amber); color: var(--slate); padding: 0 5px; border-radius: 3px; }
+  .card .keys .default { color: #fff; }
 
   .note { margin: 0 0 64px; color: var(--ink-soft); font-size: 0.95rem; }
 
@@ -225,10 +228,10 @@ See "systemctl status nginx.service" for details.
             <p class="msg tool">read the screen of ssh prod-box</p>
             <p class="msg"><span class="who">agent</span>The start failed on the server. I'll check the unit status.</p>
             <div class="card">
-              <p class="where">Type into ssh prod-box</p>
-              <p class="payload">"sudo systemctl status nginx" <span class="key">⏎ Enter</span></p>
+              <p class="where">wants to type into <span>ssh</span></p>
+              <p class="payload">sudo systemctl status nginx<span class="key">⏎ Enter</span></p>
               <ul class="keys">
-                <li><b>y</b> approve</li><li><b>e</b> edit</li><li><b>n</b> deny</li><li><b>a</b> allow for this task</li>
+                <li class="default"><b>y</b> approve (Enter)</li><li><b>e</b> edit</li><li><b>n</b> deny</li><li><b>a</b> all</li>
               </ul>
             </div>
           </div>
@@ -340,7 +343,8 @@ npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="but
             <p class="step-title">Ask</p>
             <dl class="keys-inline">
               <dt><kbd>ctrl+k</kbd></dt><dd>Open the agent anywhere, even inside ssh or vim, and ask in plain words.</dd>
-              <dt><kbd>y</kbd> <kbd>e</kbd> <kbd>n</kbd> <kbd>a</kbd></dt><dd>Approve, edit, or deny each keystroke it wants to send, or allow the rest of this task.</dd>
+              <dt><kbd>y</kbd> <kbd>e</kbd> <kbd>n</kbd> <kbd>a</kbd></dt><dd>Approve, edit, or deny each keystroke it wants to send, or allow the rest of this task. <kbd>Enter</kbd> approves too.</dd>
+              <dt><kbd>/clear</kbd></dt><dd>Start a fresh chat (or <kbd>ctrl+l</kbd> on the agent line). <kbd>↑</kbd> <kbd>↓</kbd> bring back earlier prompts.</dd>
               <dt><kbd># find big files</kbd></dt><dd>At an empty prompt, get one suggested command placed in your prompt to edit.</dd>
             </dl>
           </div>
@@ -363,6 +367,7 @@ npm install &amp;&amp; npm run build &amp;&amp; npm link</code><button type="but
             <li><span class="mark ok">✔</span><span>Blocks in Windows PowerShell 5.1</span></li>
             <li><span class="mark ok">✔</span><span><code>#</code> suggestions and Explain error</span></li>
             <li><span class="mark ok">✔</span><span>Block selection, copy and rerun</span></li>
+            <li><span class="mark ok">✔</span><span>Drag to copy text from the shell or the agent line</span></li>
             <li><span class="mark ok">✔</span><span>F1 help</span></li>
           </ul>
         </div>
