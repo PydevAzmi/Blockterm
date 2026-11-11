@@ -33,7 +33,7 @@ Press `ctrl+↑` / `ctrl+↓` to select older / newer blocks. With a block selec
 
 `PgUp` / `PgDn` / `Home` / `End` scroll the blocks while one is selected.
 
-Copying writes OSC 52 to the terminal and also pipes to the native clipboard tool: `clip` on Windows, `pbcopy` on macOS, `wl-copy` on Wayland, or `xclip -selection clipboard` on X11. Over ssh, OSC 52 sets the clipboard of the terminal you are sitting at when it supports it. In tmux, add `set -g set-clipboard on` to `~/.tmux.conf`.
+Copying writes OSC 52 to the terminal and also pipes to the native clipboard tool: PowerShell `Set-Clipboard` on Windows, `pbcopy` on macOS, `wl-copy` on Wayland, or `xclip -selection clipboard` on X11. Over ssh, OSC 52 sets the clipboard of the terminal you are sitting at when it supports it. In tmux, add `set -g set-clipboard on` to `~/.tmux.conf`.
 
 ## Your shell, any number of windows
 
