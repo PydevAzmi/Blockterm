@@ -42,13 +42,11 @@ test('osc52 encodes UTF-8 as base64 between the OSC 52 markers', () => {
   );
 });
 
-test('nativeTool picks clip with UTF-16LE on Windows', () => {
-  const present = (): boolean => true;
-  expect(nativeTool('win32', {}, present)).toEqual({
-    cmd: 'clip',
-    args: [],
-    encoding: 'utf16le',
-  });
+test('nativeTool picks PowerShell Set-Clipboard with base64 input on Windows', () => {
+  const tool = nativeTool('win32', {}, cmd => cmd === 'powershell');
+  expect(tool?.cmd).toBe('powershell');
+  expect(tool?.encoding).toBe('base64');
+  expect(tool?.args.at(-1)).toContain('Set-Clipboard');
 });
 
 test('nativeTool picks pbcopy on macOS', () => {
@@ -82,31 +80,32 @@ test('nativeTool returns null when no tool exists', () => {
   expect(nativeTool('darwin', {}, () => false)).toBeNull();
 });
 
-test('copyText always writes OSC 52 and pipes UTF-16LE with a BOM to clip', () => {
-  const host: string[] = [];
-  const fake = fakeSpawn();
+test('copyText always writes OSC 52 and pipes exactly the text, as base64, on Windows', () => {
+  for (const text of ['1296', '世 é\n']) {
+    const host: string[] = [];
+    const fake = fakeSpawn();
 
-  copyText('世 é\n', {
-    writeHost: text => host.push(text),
-    platform: 'win32',
-    env: {},
-    spawn: fake.spawn,
-    has: cmd => cmd === 'clip',
-  });
+    copyText(text, {
+      writeHost: s => host.push(s),
+      platform: 'win32',
+      env: {},
+      spawn: fake.spawn,
+      has: cmd => cmd === 'powershell',
+    });
 
-  expect(host).toEqual([osc52('世 é\n')]);
-  expect(fake.calls).toHaveLength(1);
-  expect(fake.calls[0]!.cmd).toBe('clip');
-  expect(fake.calls[0]!.args).toEqual([]);
-  expect(fake.calls[0]!.opts).toMatchObject({
-    stdio: ['pipe', 'ignore', 'ignore'],
-    windowsHide: true,
-  });
-  expect(fake.child.stdin.chunks).toHaveLength(1);
-  expect(fake.child.stdin.chunks[0]).toEqual(
-    Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('世 é\n', 'utf16le')]),
-  );
-  expect(fake.child.stdin.ended).toBe(true);
+    expect(host).toEqual([osc52(text)]);
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]!.cmd).toBe('powershell');
+    expect(fake.calls[0]!.opts).toMatchObject({
+      stdio: ['pipe', 'ignore', 'ignore'],
+      windowsHide: true,
+    });
+    expect(fake.child.stdin.chunks).toHaveLength(1);
+    // No BOM, nothing extra: the payload decodes back to the text and only the text.
+    const sent = fake.child.stdin.chunks[0]!.toString('ascii');
+    expect(Buffer.from(sent, 'base64').toString('utf8')).toBe(text);
+    expect(fake.child.stdin.ended).toBe(true);
+  }
 });
 
 test('copyText pipes UTF-8 without a BOM to pbcopy', () => {
@@ -161,7 +160,7 @@ test('copyText finds the native tool on PATH when has is not supplied', () => {
 test('copyText finds Windows commands through PATHEXT', () => {
   const dir = mkdtempSync(join(tmpdir(), 'blockterm-clipboard-'));
   try {
-    writeFileSync(join(dir, 'clip.EXE'), '');
+    writeFileSync(join(dir, 'powershell.EXE'), '');
     const fake = fakeSpawn();
 
     copyText('x', {
@@ -171,7 +170,7 @@ test('copyText finds Windows commands through PATHEXT', () => {
       spawn: fake.spawn,
     });
 
-    expect(fake.calls[0]!.cmd).toBe('clip');
+    expect(fake.calls[0]!.cmd).toBe('powershell');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

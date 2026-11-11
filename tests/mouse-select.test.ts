@@ -59,6 +59,12 @@ test('multi-row selection trims trailing spaces and joins rows with \\n', () => 
   expect(selectedText(f, sel)).toBe('llo\nworld  x');
 });
 
+test('a selection stops at its last cell: 1296 out of 12962 copies 1296', () => {
+  const f = frameOf(['x 12962 y ']);
+  const sel = { pane: 'shell', anchor: { row: 0, col: 2 }, head: { row: 0, col: 5 }, moved: true } as const;
+  expect(selectedText(f, sel)).toBe('1296');
+});
+
 test('backwards drag gives the same text', () => {
   const f = frameOf(['hello     ', 'world     ']);
   const sel = { pane: 'shell', anchor: { row: 1, col: 4 }, head: { row: 0, col: 1 }, moved: true } as const;

@@ -5,8 +5,14 @@ import { delimiter, join } from 'node:path';
 export interface NativeTool {
   cmd: string;
   args: string[];
-  encoding: 'utf8' | 'utf16le';
+  encoding: 'utf8' | 'base64';
 }
+
+// clip.exe guesses its input encoding: a UTF-16 BOM lands in the clipboard as a literal U+FEFF,
+// and without one non-ASCII text is misread. So Windows goes through Set-Clipboard, fed base64
+// on stdin so the console code page never touches the text.
+const SET_CLIPBOARD =
+  'Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())))';
 
 export function osc52(text: string): string {
   return `\x1b]52;c;${Buffer.from(text, 'utf8').toString('base64')}\x07`;
@@ -18,7 +24,13 @@ export function nativeTool(
   has: (cmd: string) => boolean,
 ): NativeTool | null {
   if (platform === 'win32') {
-    return has('clip') ? { cmd: 'clip', args: [], encoding: 'utf16le' } : null;
+    return has('powershell')
+      ? {
+          cmd: 'powershell',
+          args: ['-NoProfile', '-NonInteractive', '-Command', SET_CLIPBOARD],
+          encoding: 'base64',
+        }
+      : null;
   }
   if (platform === 'darwin') {
     return has('pbcopy') ? { cmd: 'pbcopy', args: [], encoding: 'utf8' } : null;
@@ -95,10 +107,8 @@ export function copyText(
   if (stdin === null || stdin === undefined) return;
   stdin.on('error', () => {});
 
-  const payload =
-    tool.encoding === 'utf16le'
-      ? Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')])
-      : Buffer.from(text, 'utf8');
+  const utf8 = Buffer.from(text, 'utf8');
+  const payload = tool.encoding === 'base64' ? Buffer.from(utf8.toString('base64'), 'ascii') : utf8;
   try {
     stdin.end(payload);
   } catch {
